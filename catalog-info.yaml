@@ -1,0 +1,11 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: studio-mcp
+  annotations:
+    github.com/project-slug: snyk/studio-mcp
+    github.com/team-slug: snyk/agentic_dev
+spec:
+  type: external-tooling
+  lifecycle: "-"
+  owner: ide
