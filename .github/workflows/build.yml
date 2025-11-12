@@ -54,3 +54,40 @@ jobs:
 
       - name: Run tests
         run: make clean test
+
+  update-licenses:
+    name: update licenses
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.HAMMERHEAD_GITHUB_PAT_SNYKLS }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Setup tools (`make tools`)
+        run: make tools
+
+      - name: update licenses
+        run: make license-update
+
+      - name: commit license changes
+        uses: EndBug/add-and-commit@v9
+        with:
+          default_author: github_actor
+          committer_name: Github Actions
+          committer_email: noreply@snyk.io
+          message: "docs: updated licenses"
+          add: "licenses"
+          push: true

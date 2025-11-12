@@ -24,11 +24,11 @@ GOPATH := $(shell go env GOPATH)
 GOROOT := $(shell go env GOROOT)
 VERSION := $(shell git show -s --format=%cd --date=format:%Y%m%d.%H%M%S)
 COMMIT := $(shell git show -s --format=%h)
-LDFLAGS_DEV := "-X 'github.com/snyk/snyk-ls/application/config.Development=true' -X 'github.com/snyk/snyk-ls/application/config.Version=v$(VERSION)-SNAPSHOT-$(COMMIT)'"
+LDFLAGS_DEV := "-X 'github.com/snyk/studio-mcp/application/config.Development=true' -X 'github.com/snyk/studio-mcp/application/config.Version=v$(VERSION)-SNAPSHOT-$(COMMIT)'"
 
 TOOLS_BIN := $(shell pwd)/.bin
 
-OVERRIDE_GOCI_LINT_V := v1.64.8
+OVERRIDE_GOCI_LINT_V := v2.6.1
 GOLICENSES_V := v1.6.0
 PACT_V := 2.4.2
 
@@ -117,18 +117,12 @@ endif
 .PHONY: license-update
 license-update: $(TOOLS_BIN)/go-licenses
 	@echo "==> Updating license information..."
-	@# TODO - Find a better solution to prevent the deletion of manually added license files.
-	@mkdir -p 'licenses_temp/github.com/brianblakely/nodep-date-input-polyfill'
-	@mv 'licenses/github.com/brianblakely/nodep-date-input-polyfill/LICENSE' 'licenses_temp/github.com/brianblakely/nodep-date-input-polyfill/LICENSE'
 	@rm -rf 'licenses'
-	@GOROOT=$(GOROOT) $(TOOLS_BIN)/go-licenses save . --save_path="licenses" --ignore "github.com/snyk/snyk-ls"
-	@mkdir -p 'licenses/github.com/brianblakely/nodep-date-input-polyfill'
-	@mv 'licenses_temp/github.com/brianblakely/nodep-date-input-polyfill/LICENSE' 'licenses/github.com/brianblakely/nodep-date-input-polyfill/LICENSE'
-	@rm -rf 'licenses_temp'
+	@GOROOT=$(GOROOT) $(TOOLS_BIN)/go-licenses save ./pkg/mcp --save_path="licenses" --ignore "github.com/snyk/studio-mcp"
 
 .PHONY: licenses
 licenses: $(TOOLS_BIN)/go-licenses
-	@GOROOT=$(GOROOT) $(TOOLS_BIN)/go-licenses report . --ignore github.com/snyk/snyk-ls
+	@GOROOT=$(GOROOT) $(TOOLS_BIN)/go-licenses report ./pkg/mcp --ignore github.com/snyk/studio-mcp
 
 help: Makefile
 	@echo "Usage: make <command>"
