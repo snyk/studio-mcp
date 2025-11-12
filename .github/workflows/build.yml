@@ -27,7 +27,12 @@ jobs:
         run: make generate
 
       - name: Verify generated files match committed versions
-        run: git status --porcelain=v1 | tee /dev/stderr | wc -l | grep -qE '^ *0 *$'
+        run: |
+          if ! git status --porcelain=v1 | wc -l | grep -qE '^ *0 *$'; then
+            echo "❌ Generated files have changed. Please run 'make generate' locally and commit the changes."
+            git status --porcelain=v1
+            exit 1
+          fi
 
       - name: Lint source code
         run: make lint
@@ -78,12 +83,10 @@ jobs:
       - name: update licenses
         run: make license-update
 
-      - name: commit license changes
-        uses: EndBug/add-and-commit@v9
-        with:
-          default_author: github_actor
-          committer_name: Github Actions
-          committer_email: noreply@snyk.io
-          message: "docs: updated licenses"
-          add: "licenses"
-          push: true
+      - name: Verify license files match committed versions
+        run: |
+          if ! git status --porcelain=v1 | wc -l | grep -qE '^ *0 *$'; then
+            echo "❌ License files have changed. Please run 'make license-update' locally and commit the changes."
+            git status --porcelain=v1
+            exit 1
+          fi
