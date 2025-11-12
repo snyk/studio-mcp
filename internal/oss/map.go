@@ -1,13 +1,10 @@
 package oss
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/snyk/studio-mcp/internal/types"
@@ -105,7 +102,6 @@ func toIssue(issue ossIssue, targetFilePath string) *types.IssueData {
 		FixedIn:     issue.FixedIn,
 		Remediation: issue.getRemediation(),
 		FilePath:    targetFilePath,
-		Line:        issue.LineNumber,
 		Message:     message,
 		IsIgnored:   issue.IsIgnored,
 	}
@@ -167,9 +163,4 @@ func (i *ossIssue) getRemediation() string {
 		}
 	}
 	return ""
-}
-
-func GetIssueKey(ruleId string, path string, startLine int, endLine int, startCol int, endCol int) string {
-	id := sha256.Sum256([]byte(ruleId + path + strconv.Itoa(startLine) + strconv.Itoa(endLine) + strconv.Itoa(startCol) + strconv.Itoa(endCol)))
-	return hex.EncodeToString(id[:16])
 }
