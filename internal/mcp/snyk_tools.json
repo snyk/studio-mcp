@@ -37,6 +37,12 @@
           "description": "Auto-detects and tests all supported package manager manifest files found within the current directory and its subdirectories. Ideal for monorepos or solutions containing multiple projects. Mutually exclusive with `maven_aggregate_project` for Maven. Default is true."
         },
         {
+          "name": "include_ignores",
+          "type": "boolean",
+          "isRequired": false,
+          "description": "Include ignored vulnerabilities in the output."
+        },
+        {
           "name": "fail_fast",
           "type": "boolean",
           "isRequired": false,
