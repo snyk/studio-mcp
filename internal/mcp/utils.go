@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package mcp_extension
+package mcp
 
 import (
 	"context"

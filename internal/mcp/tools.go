@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package mcp_extension
+package mcp
 
 import (
 	"context"
@@ -32,24 +32,22 @@ import (
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
-	"github.com/snyk/snyk-ls/infrastructure/authentication"
-	"github.com/snyk/snyk-ls/infrastructure/learn"
-	"github.com/snyk/studio-mcp/analytics"
-
 	"github.com/snyk/go-application-framework/pkg/workflow"
-	"github.com/snyk/snyk-ls/mcp_extension/trust"
+	"github.com/snyk/studio-mcp/internal/analytics"
+	"github.com/snyk/studio-mcp/internal/authentication"
+	"github.com/snyk/studio-mcp/internal/trust"
+	"github.com/snyk/studio-mcp/internal/types"
 )
 
 // Tool name constants to maintain backward compatibility
 const (
-	SnykScaTest         = "snyk_sca_scan"
-	SnykCodeTest        = "snyk_code_scan"
-	SnykVersion         = "snyk_version"
-	SnykAuth            = "snyk_auth"
-	SnykLogout          = "snyk_logout"
-	SnykTrust           = "snyk_trust"
-	SnykOpenLearnLesson = "snyk_open_learn_lesson"
-	SnykSendFeedback    = "snyk_send_feedback"
+	SnykScaTest      = "snyk_sca_scan"
+	SnykCodeTest     = "snyk_code_scan"
+	SnykVersion      = "snyk_version"
+	SnykAuth         = "snyk_auth"
+	SnykLogout       = "snyk_logout"
+	SnykTrust        = "snyk_trust"
+	SnykSendFeedback = "snyk_send_feedback"
 )
 
 type SnykMcpToolsDefinition struct {
@@ -330,7 +328,7 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 		clientInfo := ClientInfoFromContext(ctx)
 
 		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
-		event := analytics.NewAnalyticsEventParam("Send feedback", nil, FilePath(path))
+		event := analytics.NewAnalyticsEventParam("Send feedback", nil, types.FilePath(path))
 
 		event.Extension = map[string]any{
 			"mcp::preventedIssuesCount":  int(preventedCount),

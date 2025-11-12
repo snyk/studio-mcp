@@ -1,4 +1,4 @@
-package mcp_extension
+package mcp
 
 import (
 	"testing"

@@ -14,17 +14,12 @@
  * limitations under the License.
  */
 
-package mcp_extension
+package mcp
 
 import (
 	"net/url"
 
 	"github.com/rs/zerolog"
-
-	"github.com/snyk/go-application-framework/pkg/workflow"
-
-	"github.com/snyk/snyk-ls/infrastructure/learn"
-	"github.com/snyk/snyk-ls/internal/types"
 )
 
 type Option func(server *McpLLMBinding)
@@ -45,23 +40,5 @@ func WithCliPath(cliPath string) Option {
 func WithBaseURL(baseURL *url.URL) func(server *McpLLMBinding) {
 	return func(server *McpLLMBinding) {
 		server.baseURL = baseURL
-	}
-}
-
-func WithOpenBrowserFunc(fn types.OpenBrowserFunc) Option {
-	return func(server *McpLLMBinding) {
-		server.openBrowserFunc = fn
-	}
-}
-
-// LearnServiceFactoryFunc defines the signature for a function that can create a learn.Service.
-type LearnServiceFactoryFunc func(invocationContext workflow.InvocationContext, logger *zerolog.Logger) learn.Service
-
-// WithLearnServiceFactory provides an option to set a custom factory for creating the learn.Service.
-func WithLearnServiceFactory(factory LearnServiceFactoryFunc) Option {
-	return func(server *McpLLMBinding) {
-		if factory != nil {
-			server.learnServiceFactory = factory
-		}
 	}
 }

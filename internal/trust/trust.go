@@ -35,8 +35,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/configuration"
-
-	"github.com/snyk/snyk-ls/mcp_extension/networking"
+	"github.com/snyk/studio-mcp/internal/networking"
 )
 
 const (

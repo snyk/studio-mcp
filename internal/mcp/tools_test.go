@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package mcp_extension
+package mcp
 
 import (
 	"context"
@@ -31,6 +31,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
+	"github.com/snyk/studio-mcp/internal/authentication"
+	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/stretchr/testify/require"
 
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -38,12 +40,6 @@ import (
 	"github.com/snyk/go-application-framework/pkg/mocks"
 	"github.com/snyk/go-application-framework/pkg/runtimeinfo"
 	"github.com/snyk/go-application-framework/pkg/workflow"
-
-	"github.com/snyk/snyk-ls/infrastructure/authentication"
-	"github.com/snyk/snyk-ls/infrastructure/learn"
-	"github.com/snyk/snyk-ls/infrastructure/learn/mock_learn"
-	"github.com/snyk/snyk-ls/internal/testsupport"
-	"github.com/snyk/snyk-ls/mcp_extension/trust"
 )
 
 type testFixture struct {
@@ -98,16 +94,6 @@ func setupTestFixture(t *testing.T) *testFixture {
 	binding := NewMcpLLMBinding(WithCliPath(snykCliPath), WithLogger(invocationCtx.GetEnhancedLogger()))
 	binding.folderTrust = trust.NewFolderTrust(&logger, invocationCtx.GetConfiguration())
 	binding.mcpServer = server.NewMCPServer("Snyk", "1.1.1")
-
-	// Create and set mock learn service
-	mockLearnService := mock_learn.NewMockService(mockctl)
-	mockLearnService.EXPECT().
-		GetLesson(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&learn.Lesson{
-			Url: "https://learn.snyk.io/lesson/mock-lesson",
-		}, nil).
-		AnyTimes()
-	binding.learnService = mockLearnService
 
 	tools, err := loadMcpToolsFromJson()
 	require.NoError(t, err)
@@ -916,9 +902,27 @@ exit 0
 	require.NoError(t, err)
 }
 
+// PathSafeTestName returns a file-system-safe version of the test name.
+// Replaces characters that could cause issues with file system paths.
+func PathSafeTestName(t *testing.T) string {
+	t.Helper()
+	replacer := strings.NewReplacer(
+		"/", "__",
+		"\\", "__",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	return replacer.Replace(t.Name())
+}
+
 func TestPrepareCmdArgsForTool(t *testing.T) {
 	dir := t.TempDir()
-	tempFile, err := os.CreateTemp(dir, testsupport.PathSafeTestName(t))
+	tempFile, err := os.CreateTemp(dir, PathSafeTestName(t))
 	if err != nil {
 		t.Fatal(err)
 	}

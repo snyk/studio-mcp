@@ -14,23 +14,22 @@
  * limitations under the License.
  */
 
-package mcp_extension
+package mcp
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/adrg/xdg"
+	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
-	storage2 "github.com/snyk/studio-mcp/storage"
-
+	"github.com/snyk/studio-mcp/internal/mcp"
+	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/spf13/pflag"
-
-	"github.com/snyk/snyk-ls/application/entrypoint"
-	"github.com/snyk/snyk-ls/mcp_extension/trust"
 
 	"github.com/snyk/go-application-framework/pkg/workflow"
 )
@@ -53,11 +52,24 @@ func Init(engine workflow.Engine) error {
 	return nil
 }
 
+func OnPanicRecover(logger *zerolog.Logger) {
+	if err := recover(); err != nil {
+		panickingMsg := "🚨 Panicking 🚨"
+		_, _ = fmt.Fprintln(os.Stderr, panickingMsg)
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		debug.PrintStack()
+
+		logger.Error().Msg(panickingMsg)
+		logger.Error().Any("recovered panic", err).Send()
+		logger.Error().Msg(string(debug.Stack()))
+	}
+}
+
 func mcpWorkflow(
 	invocation workflow.InvocationContext,
 	_ []workflow.Data,
 ) (output []workflow.Data, err error) {
-	defer entrypoint.OnPanicRecover()
+	defer OnPanicRecover(invocation.GetEnhancedLogger())
 
 	config := invocation.GetConfiguration()
 	logger := invocation.GetEnhancedLogger()
@@ -113,14 +125,7 @@ func useIdeStorage(invocationCtx workflow.InvocationContext, ideConfigPath strin
 	if _, err = os.Stat(file); err != nil {
 		return err
 	}
-
-	storage, err := storage2.NewStorageWithCallbacks(
-		storage2.WithStorageFile(file),
-		storage2.WithLogger(invocationCtx.GetEnhancedLogger()),
-	)
-	if err != nil {
-		return err
-	}
+	storage := configuration.NewJsonStorage(file, configuration.WithConfiguration(invocationCtx.GetEngine().GetConfiguration()))
 
 	config := invocationCtx.GetConfiguration()
 	config.SetStorage(storage)
@@ -150,7 +155,7 @@ func useIdeStorage(invocationCtx workflow.InvocationContext, ideConfigPath strin
 
 func mcpStart(invocationContext workflow.InvocationContext, cliPath string) {
 	logger := invocationContext.GetEnhancedLogger()
-	mcpServer := NewMcpLLMBinding(WithLogger(invocationContext.GetEnhancedLogger()), WithCliPath(cliPath))
+	mcpServer := mcp.NewMcpLLMBinding(mcp.WithLogger(invocationContext.GetEnhancedLogger()), mcp.WithCliPath(cliPath))
 
 	// start mcp server
 	err := mcpServer.Start(invocationContext)

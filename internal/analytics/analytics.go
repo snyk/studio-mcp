@@ -29,9 +29,7 @@ import (
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
 	"github.com/snyk/go-application-framework/pkg/networking"
 	"github.com/snyk/go-application-framework/pkg/workflow"
-	"github.com/snyk/studio-mcp/types"
-
-	"github.com/snyk/snyk-ls/application/config"
+	"github.com/snyk/studio-mcp/internal/types"
 )
 
 var analyticsMu = sync.RWMutex{}
@@ -144,7 +142,13 @@ func PayloadForAnalyticsEventParam(engine workflow.Engine, deviceId string, para
 	for s, a := range param.Extension {
 		ic.AddExtension(s, a)
 	}
-	ua := GetUserAgent(engine.GetConfiguration(), config.Version)
+
+	integrationVersion := "unknown"
+	runtimeInfo := engine.GetRuntimeInfo()
+	if runtimeInfo != nil {
+		integrationVersion = runtimeInfo.GetVersion()
+	}
+	ua := GetUserAgent(engine.GetConfiguration(), integrationVersion)
 	ic.SetUserAgent(ua)
 
 	ic.SetTimestamp(time.UnixMilli(param.TimestampMs))

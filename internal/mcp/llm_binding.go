@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package mcp_extension
+package mcp
 
 import (
 	"context"
@@ -33,10 +33,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
-	"github.com/snyk/studio-mcp/logging"
-	"github.com/snyk/studio-mcp/networking"
-	"github.com/snyk/studio-mcp/trust"
-	"github.com/snyk/studio-mcp/types"
+	"github.com/snyk/studio-mcp/internal/logging"
+	"github.com/snyk/studio-mcp/internal/networking"
+	"github.com/snyk/studio-mcp/internal/trust"
+	"github.com/snyk/studio-mcp/internal/types"
 	"golang.org/x/exp/slices"
 	"golang.org/x/oauth2"
 
@@ -52,16 +52,15 @@ const (
 // McpLLMBinding is an implementation of a mcp server that allows interaction between
 // a given SnykLLMBinding and a CommandService.
 type McpLLMBinding struct {
-	logger              *zerolog.Logger
-	mcpServer           *server.MCPServer
-	sseServer           *server.SSEServer
-	folderTrust         *trust.FolderTrust
-	baseURL             *url.URL
-	mutex               sync.RWMutex
-	started             bool
-	cliPath             string
-	openBrowserFunc     types.OpenBrowserFunc
-	learnServiceFactory LearnServiceFactoryFunc
+	logger          *zerolog.Logger
+	mcpServer       *server.MCPServer
+	sseServer       *server.SSEServer
+	folderTrust     *trust.FolderTrust
+	baseURL         *url.URL
+	mutex           sync.RWMutex
+	started         bool
+	cliPath         string
+	openBrowserFunc types.OpenBrowserFunc
 }
 
 func NewMcpLLMBinding(opts ...Option) *McpLLMBinding {

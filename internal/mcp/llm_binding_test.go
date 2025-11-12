@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package mcp_extension
+package mcp
 
 import (
 	"encoding/json"
@@ -28,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
+	"github.com/snyk/studio-mcp/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
@@ -35,11 +36,6 @@ import (
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	"github.com/snyk/go-application-framework/pkg/mocks"
-	"github.com/snyk/go-application-framework/pkg/workflow"
-
-	"github.com/snyk/snyk-ls/infrastructure/learn"
-	"github.com/snyk/snyk-ls/infrastructure/learn/mock_learn"
-	"github.com/snyk/snyk-ls/mcp_extension/networking"
 )
 
 func TestNewMcpServer(t *testing.T) {
@@ -403,42 +399,6 @@ func TestStart(t *testing.T) {
 		// Test with nil context - should panic as expected
 		assert.Panics(t, func() {
 			_ = binding.Start(nil)
-		})
-	})
-
-	t.Run("stores learn service factory", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		// Create a mock learn service
-		mockLearnService := mock_learn.NewMockService(ctrl)
-
-		// Create a factory that returns our mock
-		mockFactory := func(invocationContext workflow.InvocationContext, logger *zerolog.Logger) learn.Service {
-			return mockLearnService
-		}
-
-		binding := NewMcpLLMBinding(WithLearnServiceFactory(mockFactory))
-
-		// Verify the factory was stored
-		assert.NotNil(t, binding.learnServiceFactory)
-	})
-}
-
-func TestNewDefaultLearnService(t *testing.T) {
-	t.Run("panics with nil invocation context", func(t *testing.T) {
-		logger := zerolog.Nop()
-
-		// Test with nil context - should panic as expected
-		assert.Panics(t, func() {
-			NewDefaultLearnService(nil, &logger)
-		})
-	})
-
-	t.Run("panics with nil parameters", func(t *testing.T) {
-		// Test with nil parameters - should panic as expected
-		assert.Panics(t, func() {
-			NewDefaultLearnService(nil, nil)
 		})
 	})
 }
