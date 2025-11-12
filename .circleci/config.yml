@@ -23,11 +23,11 @@ workflows:
           name: Scan repository for secrets
           context:
             - snyk-bot-slack
-          channel: snyk-on-snyk-devex_ide
+          channel: snyk-on-snyk-productinfra_agentic-dev
           filters:
             branches:
               ignore:
                 - main  
           
       - security-scans:
-          context: devex_ide
+          context: productinfra-agentic-dev-sos
