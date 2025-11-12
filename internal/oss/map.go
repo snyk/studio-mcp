@@ -70,7 +70,7 @@ func convertScanResultToIssues(workDir string, res *ScanResult, includeIgnores b
 		if duplicateCheckMap[duplicateKey] {
 			continue
 		}
-		snykIssue := toIssue(workDir, issue, res, targetFilePath)
+		snykIssue := toIssue(issue, targetFilePath)
 		issues = append(issues, *snykIssue)
 		duplicateCheckMap[duplicateKey] = true
 	}
@@ -78,7 +78,7 @@ func convertScanResultToIssues(workDir string, res *ScanResult, includeIgnores b
 
 }
 
-func toIssue(workDir string, issue ossIssue, scanResult *ScanResult, targetFilePath string) *types.IssueData {
+func toIssue(issue ossIssue, targetFilePath string) *types.IssueData {
 	title := issue.Title
 
 	message := fmt.Sprintf(
@@ -125,10 +125,6 @@ func getAbsTargetFilePath(workDir string, displayTargetFile string) string {
 		return targetFilePath
 	}
 	return filepath.Join(workDir, targetFilePath)
-}
-
-func (i *ossIssue) isLicenseIssue() bool {
-	return i.License != ""
 }
 
 func (i *ossIssue) getUpgradeMessage() string {

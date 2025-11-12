@@ -62,31 +62,6 @@ func (s *SarifConverter) isSecurityIssue(r codeClientSarif.Rule) bool {
 	return isSecurity
 }
 
-func (s *SarifConverter) cwe(r codeClientSarif.Rule) string {
-	count := len(r.Properties.Cwe)
-	if count == 0 {
-		return ""
-	}
-	builder := strings.Builder{}
-	builder.Grow(100)
-	ending := "y"
-	if count > 1 {
-		ending = "ies"
-	}
-	builder.WriteString(fmt.Sprintf("Vulnerabilit%s: ", ending))
-	for i, cwe := range r.Properties.Cwe {
-		if i > 0 {
-			builder.WriteString(" | ")
-		}
-		builder.WriteString(fmt.Sprintf(
-			"[%s](%s)",
-			cwe,
-			fmt.Sprintf("https://cwe.mitre.org/data/definitions/%s.html", strings.Split(cwe, "-")[1])))
-	}
-	builder.WriteString("\n\n\n")
-	return builder.String()
-}
-
 func (s *SarifConverter) getCodeFlow(r codeClientSarif.Result, baseDir types.FilePath) (dataflow []types.DataflowElement) {
 	flows := r.CodeFlows
 	dedupMap := map[string]bool{}

@@ -1,0 +1,56 @@
+name: Build
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Setup tools
+        run: make tools
+
+      - name: Run go generate commands
+        run: make generate
+
+      - name: Verify generated files match committed versions
+        run: git status --porcelain=v1 | tee /dev/stderr | wc -l | grep -qE '^ *0 *$'
+
+      - name: Lint source code
+        run: make lint
+
+  unit-tests:
+    name: unit tests
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Setup tools
+        run: make tools
+
+      - name: Run tests
+        run: make clean test
