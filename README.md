@@ -1,10 +1,4 @@
-# Snyk MCP
-
-
-**Release status**&#x20;
-
-Snyk MCP is in Early Access and available with all Snyk plans. You can access it through the Snyk CLI.
-
+# Snyk Studio MCP
 
 MCP (Model Context Protocol) is an open protocol that standardizes how applications share context with large language models.
 
@@ -13,14 +7,6 @@ MCP can provide AI systems with additional information needed to generate accura
 You can integrate Snyk MCP into MCP-supporting tools to provide Snyk security context.
 
 Snyk is introducing an MCP server as part of the Snyk CLI. This allows MCP-enabled agentic tools to integrate Snyk security scanning capabilities directly, thus bridging the gap between security scanning and AI-assisted workflows.
-
-The `snyk mcp` command is available in Early Access for the following reasons:
-
-* MCP is a new and rapidly evolving standard.
-* The `snyk mcp` command is an early implementation of integrating Snyk security scanning into the MCP-enabled environment.
-* Snyk wants to gather feedback on the benefits of MCP as an integration pattern for Snyk security.
-
-Because the `snyk mcp` command is an Early Access feature, the specific usage, parameters, and output related to this command may evolve as both MCP and this Snyk integration mature. Changes are possible before a general release.
 
 In environments or applications that use MCP, you can use the `snyk mcp` CLI command to:
 
@@ -47,4 +33,6 @@ In environments or applications that use MCP, you can use the `snyk mcp` CLI com
 Running `snyk_sca_scan` may execute third-party ecosystem tools (for example, Gradle or Maven) on your machine to fetch the project's dependency tree.
 
 
-For more details, see the [Snyk MCP installation, configuration and startup](snyk-mcp-installation-configuration-and-startup.md) and [Troubleshooting for the Snyk MCP server](../../../../snyk-cli/developer-guardrails-for-agentic-workflows/snyk-mcp-experimental/troubleshooting-for-the-snyk-mcp-server.md) pages.
+For more details, see the [Snyk MCP installation, configuration and startup](https://docs.snyk.io/integrations/snyk-studio-agentic-integrations/quickstart-guides-for-snyk-studio) and [Troubleshooting for the Snyk MCP server](https://docs.snyk.io/integrations/snyk-studio-agentic-integrations/troubleshooting) pages.
+
+**This repository is closed to public contributions.**
