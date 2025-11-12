@@ -33,7 +33,7 @@ func IsPortInUse(u *url.URL) bool {
 	if err != nil {
 		return true
 	}
-	listener.Close()
+	_ = listener.Close()
 	return false
 }
 

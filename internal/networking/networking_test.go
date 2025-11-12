@@ -30,7 +30,9 @@ func Test_isPortInUse(t *testing.T) {
 	// Create a listener on a port to simulate it being in use.
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", 0))
 	require.NoError(t, err)
-	defer listener.Close() // we don't care if this fails, it is just a catch-all
+	defer func() {
+		_ = listener.Close() // we don't care if this fails, it is just a catch-all
+	}()
 
 	u, err := url.Parse(fmt.Sprintf("http://%s", listener.Addr()))
 	require.NoError(t, err)
@@ -38,7 +40,7 @@ func Test_isPortInUse(t *testing.T) {
 	assert.True(t, inUse, "should be in listening on: %s", listener.Addr())
 
 	// close listener, to have IsPortInUse() return false
-	listener.Close()
+	_ = listener.Close()
 	inUse = IsPortInUse(u)
 	assert.False(t, inUse, "should be in listening on: %s", listener.Addr())
 
@@ -58,7 +60,9 @@ func Test_determineFreePort(t *testing.T) {
 	// Try to listen on the determined port.  If it fails, the port isn't actually free.
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	require.NoError(t, err)
-	defer listener.Close()
+	defer func() {
+		_ = listener.Close() // we don't care if this fails, it is just a catch-all
+	}()
 
 	// Simulate all ports being taken (unlikely, but tests the loop limit)
 	portsInUse := make([]net.Listener, 1000)
@@ -74,7 +78,7 @@ func Test_determineFreePort(t *testing.T) {
 	defer func() {
 		for _, l := range portsInUse {
 			if l != nil {
-				l.Close()
+				_ = l.Close()
 			}
 		}
 	}()

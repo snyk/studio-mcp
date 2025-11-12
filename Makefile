@@ -37,8 +37,7 @@ TIMEOUT := "-timeout=45m"
 
 ## tools: Install required tooling.
 .PHONY: tools
-tools: $(TOOLS_BIN)/go-licenses $(TOOLS_BIN)/golangci-lint $(TOOLS_BIN)/pact/bin/pact
-	@echo "Please make sure to install NPM locally to be able to run analytics verification Ampli."
+tools: $(TOOLS_BIN)/go-licenses $(TOOLS_BIN)/golangci-lint
 
 $(TOOLS_BIN)/go-licenses:
 	@echo "==> Installing go-licenses"
@@ -46,9 +45,6 @@ $(TOOLS_BIN)/go-licenses:
 
 $(TOOLS_BIN)/golangci-lint:
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/$(OVERRIDE_GOCI_LINT_V)/install.sh | sh -s -- -b $(TOOLS_BIN)/ $(OVERRIDE_GOCI_LINT_V)
-
-$(TOOLS_BIN)/pact/bin/pact:
-	cd $(TOOLS_BIN); curl -fsSL https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/v$(PACT_V)/install.sh | PACT_CLI_VERSION=v$(PACT_V) bash
 
 ## clean: Delete the build directory
 .PHONY: clean
