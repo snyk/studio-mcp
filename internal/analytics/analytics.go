@@ -1,0 +1,191 @@
+/*
+ * © 2025 Snyk Limited
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package analytics
+
+import (
+	"encoding/json"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/snyk/go-application-framework/pkg/analytics"
+	configuration2 "github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/go-application-framework/pkg/instrumentation"
+	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
+	"github.com/snyk/go-application-framework/pkg/networking"
+	"github.com/snyk/go-application-framework/pkg/workflow"
+	"github.com/snyk/studio-mcp/internal/types"
+)
+
+var analyticsMu = sync.RWMutex{}
+
+type EventParam struct {
+	InteractionType string         `json:"interactionType"`
+	Category        []string       `json:"category"`
+	Status          string         `json:"status"`
+	TargetId        string         `json:"targetId"`
+	TimestampMs     int64          `json:"timestampMs"`
+	DurationMs      int64          `json:"durationMs"`
+	Results         map[string]any `json:"results"`
+	Errors          []any          `json:"errors"`
+	Extension       map[string]any `json:"extension"`
+	InteractionUUID string         `json:"interactionId"`
+}
+
+func NewAnalyticsEventParam(interactionType string, err error, path types.FilePath) EventParam {
+	status := string(analytics.Success)
+	if err != nil {
+		status = string(analytics.Failure)
+	}
+
+	var targetId string
+	// If we have a file path, we use that to determine the target ID. For analytics such as authentication events, which
+	// are not associated with a file, we use the binary name as the target ID (with a fallback if that fails).
+	if path != "" {
+		targetId, _ = instrumentation.GetTargetId(string(path), instrumentation.AutoDetectedTargetId)
+	} else {
+		targetId, _ = instrumentation.GetTargetId(os.Args[0], instrumentation.FilesystemTargetId)
+		if targetId == "" {
+			targetId = "pkg:filesystem/dummy/dummy"
+		}
+	}
+
+	return EventParam{
+		InteractionType: interactionType,
+		Category:        []string{},
+		Status:          status,
+		TimestampMs:     time.Now().UnixMilli(),
+		TargetId:        targetId,
+	}
+}
+
+func SendAnalyticsToAPI(engine workflow.Engine, deviceId string, payload []byte) error {
+	logger := engine.GetLogger().With().Str("method", "analytics.sendAnalyticsToAPI").Logger()
+
+	var eventsParam EventParam
+	err := json.Unmarshal(payload, &eventsParam)
+	var inputData workflow.Data
+	if err == nil && eventsParam.TimestampMs > 0 {
+		ic := PayloadForAnalyticsEventParam(engine, deviceId, eventsParam)
+		instrumentationObject, icErr := analytics.GetV2InstrumentationObject(ic)
+		if icErr != nil {
+			return err
+		}
+
+		bytes, marshalErr := json.Marshal(instrumentationObject)
+		if marshalErr != nil {
+			return marshalErr
+		}
+
+		logger.Debug().Str("payload", string(bytes)).Msg("Analytics Payload")
+		inputData = workflow.NewData(
+			workflow.NewTypeIdentifier(localworkflows.WORKFLOWID_REPORT_ANALYTICS, "reportAnalytics"),
+			"application/json",
+			bytes,
+		)
+	} else {
+		logger.Debug().Str("payload", string(payload)).Msg("Analytics Payload")
+		inputData = workflow.NewData(
+			workflow.NewTypeIdentifier(localworkflows.WORKFLOWID_REPORT_ANALYTICS, "reportAnalytics"),
+			"application/json",
+			payload,
+		)
+	}
+	configuration := engine.GetConfiguration().Clone()
+	configuration.Set(configuration2.FLAG_EXPERIMENTAL, true)
+	analyticsMu.Lock()
+	_, err = engine.InvokeWithInputAndConfig(
+		localworkflows.WORKFLOWID_REPORT_ANALYTICS,
+		[]workflow.Data{inputData},
+		configuration,
+	)
+	analyticsMu.Unlock()
+
+	// This workflow should fail silently if the endpoint can not be found and write the error to the log.
+	if err != nil {
+		logger.Err(err).Msg("error invoking workflow")
+	}
+	return nil
+}
+
+func PayloadForAnalyticsEventParam(engine workflow.Engine, deviceId string, param EventParam) analytics.InstrumentationCollector {
+	ic := analytics.NewInstrumentationCollector()
+	// Add to the interaction attribute in the analytics event
+	if param.InteractionUUID == "" {
+		param.InteractionUUID = uuid.New().String()
+	}
+
+	iid := instrumentation.AssembleUrnFromUUID(param.InteractionUUID)
+
+	//Set the final type attribute of the analytics event
+	ic.SetType("analytics")
+	ic.SetInteractionId(iid)
+	ic.SetStage("dev")
+	if len(deviceId) > 0 {
+		ic.AddExtension("device_id", deviceId)
+	}
+	for s, a := range param.Extension {
+		ic.AddExtension(s, a)
+	}
+
+	integrationVersion := "unknown"
+	runtimeInfo := engine.GetRuntimeInfo()
+	if runtimeInfo != nil {
+		integrationVersion = runtimeInfo.GetVersion()
+	}
+	ua := GetUserAgent(engine.GetConfiguration(), integrationVersion)
+	ic.SetUserAgent(ua)
+
+	ic.SetTimestamp(time.UnixMilli(param.TimestampMs))
+	ic.SetInteractionType(param.InteractionType)
+	ic.SetStatus(analytics.Status(param.Status))
+	ic.SetCategory(param.Category)
+	ic.SetTargetId(param.TargetId)
+	return ic
+}
+
+func GetUserAgent(c configuration2.Configuration, version string) networking.UserAgentInfo {
+	ua := networking.UserAgent(networking.UaWithConfig(c), networking.UaWithApplication("MCP", version))
+	return ua
+}
+
+func SendAnalytics(engine workflow.Engine, deviceId string, event EventParam, err error) {
+	logger := engine.GetLogger().With().Str("method", "analytics.SendAnalytics").Logger()
+	ic := PayloadForAnalyticsEventParam(engine, deviceId, event)
+
+	if err != nil {
+		ic.AddError(err)
+	}
+
+	analyticsRequestBody, err := analytics.GetV2InstrumentationObject(ic)
+	if err != nil {
+		logger.Err(err).Msg("Failed to get analytics request body")
+		return
+	}
+
+	bytes, err := json.Marshal(analyticsRequestBody)
+	if err != nil {
+		logger.Err(err).Msg("Failed to marshal analytics request body")
+		return
+	}
+
+	err = SendAnalyticsToAPI(engine, deviceId, bytes)
+	if err != nil {
+		logger.Err(err).Msg("Failed to send analytics")
+	}
+}

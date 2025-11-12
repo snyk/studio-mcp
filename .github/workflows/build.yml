@@ -1,0 +1,92 @@
+name: Build
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Setup tools
+        run: make tools
+
+      - name: Run go generate commands
+        run: make generate
+
+      - name: Verify generated files match committed versions
+        run: |
+          if ! git status --porcelain=v1 | wc -l | grep -qE '^ *0 *$'; then
+            echo "❌ Generated files have changed. Please run 'make generate' locally and commit the changes."
+            git status --porcelain=v1
+            exit 1
+          fi
+
+      - name: Lint source code
+        run: make lint
+
+  unit-tests:
+    name: unit tests
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Setup tools
+        run: make tools
+
+      - name: Run tests
+        run: make clean test
+
+  check-licenses:
+    name: check licenses
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Setup tools (`make tools`)
+        run: make tools
+
+      - name: update licenses
+        run: make license-update
+
+      - name: Verify license files match committed versions
+        run: |
+          if ! git status --porcelain=v1 | wc -l | grep -qE '^ *0 *$'; then
+            echo "❌ License files have changed. Please run 'make license-update' locally and commit the changes."
+            git status --porcelain=v1
+            exit 1
+          fi

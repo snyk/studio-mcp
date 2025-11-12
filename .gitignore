@@ -1,1 +1,48 @@
-.idea
+#################################
+# Compiled source               #
+#################################
+build/
+out/
+output/
+
+#################################
+# Golang files (with tooling)   #
+#################################
+.bin
+.dccache
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+#################################
+# IDE generated files           #
+#################################
+.settings/
+.classpath
+.project
+.idea/
+*.iml
+*.ipr
+*.iws
+
+#################################
+# Logs and temp files           #
+#################################
+*.log
+*.tmp
+*~
+
+#################################
+# OS generated files            #
+#################################
+Thumbs.db
+.directory
+.DS_Store
+._*
+webidentity.json
+
+.qodo
