@@ -44,6 +44,7 @@ func Init(engine workflow.Engine) error {
 	_ = flags.MarkDeprecated(configuration.FLAG_EXPERIMENTAL, "This is feature is in early access.")
 
 	flags.Bool(trust.DisableTrustFlag, false, "disable folder trust")
+	flags.StringP(mcp.OUTPUT_DIR_PARAM, "o", "", "specifies the output directory for scan responses")
 
 	cfg := workflow.ConfigurationOptionsFromFlagset(flags)
 	entry, _ := engine.Register(WORKFLOWID_MCP, cfg, mcpWorkflow)

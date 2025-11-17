@@ -47,6 +47,7 @@ import (
 const (
 	SseTransportType   string = "sse"
 	StdioTransportType string = "stdio"
+	OUTPUT_DIR_PARAM   string = "output-dir"
 )
 
 // McpLLMBinding is an implementation of a mcp server that allows interaction between
