@@ -235,7 +235,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 
 		output = m.enhanceOutput(&logger, toolDef, output, err == nil, workingDir, includeIgnores)
 
-		if invocationCtx.GetConfiguration().IsSet(OUTPUT_DIR_PARAM) {
+		if invocationCtx.GetConfiguration().IsSet(OutputDirParam) {
 			filePath, fileErr := handleFileOutput(logger, invocationCtx, workingDir, toolDef, output)
 			if fileErr != nil {
 				return nil, fileErr
@@ -248,7 +248,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 }
 
 func handleFileOutput(logger zerolog.Logger, invocationCtx workflow.InvocationContext, workingDir string, toolDef SnykMcpToolsDefinition, toolOutput string) (string, error) {
-	outputDir := invocationCtx.GetConfiguration().GetString(OUTPUT_DIR_PARAM)
+	outputDir := invocationCtx.GetConfiguration().GetString(OutputDirParam)
 	baseDirName := filepath.Base(workingDir)
 	fileName := fmt.Sprintf("scan_output_%s_%s.json", baseDirName, toolDef.Name)
 	var path string
