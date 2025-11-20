@@ -40,6 +40,10 @@ import (
 	"github.com/snyk/studio-mcp/internal/types"
 )
 
+const (
+	OsTempDir = "ostemp"
+)
+
 // Tool name constants to maintain backward compatibility
 const (
 	SnykScaTest      = "snyk_sca_scan"
@@ -252,7 +256,7 @@ func handleFileOutput(logger zerolog.Logger, invocationCtx workflow.InvocationCo
 	baseDirName := filepath.Base(workingDir)
 	fileName := fmt.Sprintf("scan_output_%s_%s.json", baseDirName, toolDef.Name)
 	var path string
-	if strings.ToLower(outputDir) == "ostemp" {
+	if strings.ToLower(outputDir) == OsTempDir {
 		path = filepath.Join(os.TempDir(), fileName)
 	} else if filepath.IsAbs(outputDir) {
 		path = filepath.Join(outputDir, fileName)
