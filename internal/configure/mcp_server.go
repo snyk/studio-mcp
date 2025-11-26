@@ -136,14 +136,7 @@ func findServerKeyInGenericMap(servers map[string]interface{}, serverKey string)
 
 // mergeEnv merges environment variables, overriding Snyk-specific keys
 func mergeEnv(existing, new envMap) envMap {
-	resultingEnv := make(envMap)
-
-	// Copy existing env
-	if existing != nil {
-		for k, v := range existing {
-			resultingEnv[k] = v
-		}
-	}
+	resultingEnv := existing
 
 	// Override Snyk-specific keys
 	overrideKeys := []string{"SNYK_CFG_ORG", "SNYK_API", "IDE_CONFIG_PATH", "TRUSTED_FOLDERS"}

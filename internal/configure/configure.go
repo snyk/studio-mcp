@@ -113,9 +113,9 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 
 	if userInterface != nil {
 		_ = userInterface.Output("\n🎉 Configuration complete!")
-		_ = userInterface.Output(fmt.Sprintf("\nNext steps:"))
+		_ = userInterface.Output("\nNext steps:")
 		_ = userInterface.Output(fmt.Sprintf("  1. Restart %s to apply the changes", ideConf.name))
-		_ = userInterface.Output(fmt.Sprintf("  2. The Snyk MCP server will be available for AI-powered security scanning"))
+		_ = userInterface.Output("  2. The Snyk MCP server will be available for AI-powered security scanning")
 	}
 
 	return nil
