@@ -284,7 +284,7 @@ func (m *McpLLMBinding) snykAuthHandler(invocationCtx workflow.InvocationContext
 		engine := invocationCtx.GetEngine()
 		globalConfig := engine.GetConfiguration()
 		apiUrl := globalConfig.GetString(configuration.API_URL)
-
+		invocationCtx.GetNetworkAccess().GetHttpClient()
 		user, err := authentication.CallWhoAmI(&logger, engine)
 		if err == nil && user != nil {
 			msg := getAuthMsg(globalConfig, user)

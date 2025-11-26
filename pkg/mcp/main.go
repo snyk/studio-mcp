@@ -27,6 +27,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/studio-mcp/internal/configure"
 	"github.com/snyk/studio-mcp/internal/mcp"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/spf13/pflag"
@@ -38,13 +39,17 @@ var WORKFLOWID_MCP = workflow.NewWorkflowIdentifier("mcp")
 
 func Init(engine workflow.Engine) error {
 	flags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
-	flags.StringP("transport", "t", "sse", "sets transport to <sse|stdio>")
+	flags.StringP(mcp.TransportParam, "t", "sse", "sets transport to <sse|stdio>")
 
 	flags.Bool(configuration.FLAG_EXPERIMENTAL, false, "enable experimental mcp command")
 	_ = flags.MarkDeprecated(configuration.FLAG_EXPERIMENTAL, "This is feature is in early access.")
 
 	flags.Bool(trust.DisableTrustFlag, false, "disable folder trust")
 	flags.StringP(mcp.OutputDirParam, "o", "", "specifies the output directory for scan responses")
+	flags.StringP(configure.ConfigureParam, "c", "", "automatically configure snyk mcp server. supported hosts: cursor, windsurf, antigravity, copilot")
+	flags.Bool(configure.GlobalRuleParam, true, "write rules globally instead of to workspace")
+	flags.String(configure.WorkspacePath, "", "workspace path for local rules (defaults to current directory)")
+	flags.String(configure.RuleTypeParam, configure.RuleTypeAlwaysApply, "choose rule type to write <always-apply|smart-apply>. default always-apply")
 
 	cfg := workflow.ConfigurationOptionsFromFlagset(flags)
 	entry, _ := engine.Register(WORKFLOWID_MCP, cfg, mcpWorkflow)
@@ -104,7 +109,17 @@ func mcpWorkflow(
 	config.PersistInStorage(auth.CONFIG_KEY_OAUTH_TOKEN)
 	config.PersistInStorage(configuration.AUTHENTICATION_TOKEN)
 
-	mcpStart(invocation, cliPath)
+	isConfigureFlow := config.IsSet(configure.ConfigureParam)
+
+	if isConfigureFlow {
+		err = configure.Configure(invocation.GetEnhancedLogger(), invocation.GetConfiguration(), invocation.GetUserInterface(), cliPath)
+		if err != nil {
+			logger.Err(err).Msg("Failed to configure mcp server")
+			return nil, err
+		}
+	} else {
+		mcpStart(invocation, cliPath)
+	}
 
 	return output, nil
 }
