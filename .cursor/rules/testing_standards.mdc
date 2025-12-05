@@ -1,0 +1,11 @@
+---
+alwaysApply: true
+always_on: true
+trigger: always_on
+applyTo: "**"
+description: Testing Standards
+---
+
+# Project testing best practices
+
+- Whenever tests are generated or modified, ensure that they comply with our standards found in TESTING_STANDARDS_AND_DIRECTIVES.md
