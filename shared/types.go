@@ -21,6 +21,6 @@ const (
 	OutputDirParam      string = "output-dir"
 )
 
-type ConfigCallBack func(cmd string, args []string, env map[string]string) error
+type McpConfigCallBack func(cmd string, args []string, env map[string]string) error
 
-type EnvMap map[string]string
+type McpEnvMap map[string]string

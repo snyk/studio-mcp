@@ -6,8 +6,8 @@ import (
 )
 
 // getSnykMcpEnv extracts Snyk-specific environment variables from configuration
-func getSnykMcpEnv(config configuration.Configuration) shared.EnvMap {
-	env := make(shared.EnvMap)
+func getSnykMcpEnv(config configuration.Configuration) shared.McpEnvMap {
+	env := make(shared.McpEnvMap)
 
 	if org := config.GetString(configuration.ORGANIZATION); org != "" {
 		env["SNYK_CFG_ORG"] = org

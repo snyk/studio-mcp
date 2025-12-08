@@ -30,9 +30,9 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 	workspacePath := config.GetString(shared.WorkspacePath)
 	configCallback := config.Get(shared.McpConfigureCallback)
 
-	var configureMcpCallbackFunc shared.ConfigCallBack
+	var configureMcpCallbackFunc shared.McpConfigCallBack
 	if configCallback != nil {
-		callbackFunc, ok := configCallback.(shared.ConfigCallBack)
+		callbackFunc, ok := configCallback.(shared.McpConfigCallBack)
 		if !ok {
 			return fmt.Errorf("invalid config callback type: %T", configCallback)
 		}

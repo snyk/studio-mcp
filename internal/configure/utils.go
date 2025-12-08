@@ -16,7 +16,7 @@ func stringSlicesEqual(a, b []string) bool {
 }
 
 // envMapsEqual compares two environment maps for equality
-func envMapsEqual(a, b shared.EnvMap) bool {
+func envMapsEqual(a, b shared.McpEnvMap) bool {
 	if len(a) != len(b) {
 		return false
 	}

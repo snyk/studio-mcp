@@ -24,7 +24,7 @@ type McpConfig struct {
 
 // ensureMcpServerInJson creates or updates MCP server configuration in a JSON file
 // This function preserves all other fields in the JSON file
-func ensureMcpServerInJson(filePath, serverKey, command string, args []string, env shared.EnvMap, logger *zerolog.Logger) error {
+func ensureMcpServerInJson(filePath, serverKey, command string, args []string, env shared.McpEnvMap, logger *zerolog.Logger) error {
 	// Use a generic map to preserve all existing fields
 	var config map[string]interface{}
 
@@ -78,7 +78,7 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 	}
 
 	// Merge environment variables from existing env
-	var existingEnvMap shared.EnvMap
+	var existingEnvMap shared.McpEnvMap
 	if envRaw, ok := existingServerMap["env"]; ok {
 		if envBytes, err := json.Marshal(envRaw); err == nil {
 			_ = json.Unmarshal(envBytes, &existingEnvMap)
@@ -134,7 +134,7 @@ func findServerKeyInGenericMap(servers map[string]interface{}, serverKey string)
 }
 
 // mergeEnv merges environment variables, overriding Snyk-specific keys
-func mergeEnv(existing, new shared.EnvMap) shared.EnvMap {
+func mergeEnv(existing, new shared.McpEnvMap) shared.McpEnvMap {
 	resultingEnv := existing
 
 	// Override Snyk-specific keys
