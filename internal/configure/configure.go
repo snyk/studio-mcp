@@ -30,6 +30,13 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 	workspacePath := config.GetString(shared.WorkspacePath)
 	configCallback := config.Get(shared.McpConfigureCallback)
 
+	if workspacePath != "" {
+		isWorkspacePathSymlink, err := isSymlink(workspacePath)
+		if err == nil && isWorkspacePathSymlink {
+			return fmt.Errorf("using symlinks for workspace path is not supported: %s", workspacePath)
+		}
+	}
+
 	var configureMcpCallbackFunc shared.McpConfigCallBack
 	if configCallback != nil {
 		callbackFunc, ok := configCallback.(shared.McpConfigCallBack)
