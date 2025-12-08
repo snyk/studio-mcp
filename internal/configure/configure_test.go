@@ -97,8 +97,8 @@ func TestGetIdeConfig(t *testing.T) {
 
 			// Verify paths are properly set
 			if tt.hostName != "copilot" {
-				assert.NotEmpty(t, config.mcpConfigPath)
-				assert.Contains(t, config.mcpConfigPath, homeDir)
+				assert.NotEmpty(t, config.mcpGlobalConfigPath)
+				assert.Contains(t, config.mcpGlobalConfigPath, homeDir)
 			}
 			assert.NotEmpty(t, config.localRulesPath)
 		})
@@ -109,7 +109,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "mcp.json")
 
-	env := envMap{
+	env := EnvMap{
 		"SNYK_CFG_ORG": "test-org",
 		"SNYK_API":     "https://api.snyk.io",
 	}
@@ -141,7 +141,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 	})
 
 	t.Run("updates existing config", func(t *testing.T) {
-		newEnv := envMap{
+		newEnv := EnvMap{
 			"SNYK_CFG_ORG": "updated-org",
 			"SNYK_API":     "https://api.snyk.io",
 		}
@@ -174,7 +174,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		config.McpServers["OtherServer"] = McpServer{
 			Command: "/other/cli",
 			Args:    []string{"arg1"},
-			Env:     envMap{"KEY": "value"},
+			Env:     EnvMap{"KEY": "value"},
 		}
 
 		data, err = json.MarshalIndent(config, "", "  ")
@@ -222,7 +222,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Update Snyk server
-		newEnv := envMap{"SNYK_CFG_ORG": "updated-org"}
+		newEnv := EnvMap{"SNYK_CFG_ORG": "updated-org"}
 		err = ensureMcpServerInJson(configPath, "Snyk", "/updated/path", []string{"mcp", "-t", "stdio"}, newEnv, logger)
 		require.NoError(t, err)
 
@@ -278,7 +278,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Update only command and env
-		newEnv := envMap{"SNYK_CFG_ORG": "updated-org", "SNYK_API": "https://api.snyk.io"}
+		newEnv := EnvMap{"SNYK_CFG_ORG": "updated-org", "SNYK_API": "https://api.snyk.io"}
 		err = ensureMcpServerInJson(configPath, "Snyk", "/updated/cli", []string{"mcp", "-t", "stdio"}, newEnv, logger)
 		require.NoError(t, err)
 
@@ -449,32 +449,32 @@ func TestStringSlicesEqual(t *testing.T) {
 func TestEnvMapsEqual(t *testing.T) {
 	tests := []struct {
 		name     string
-		a        envMap
-		b        envMap
+		a        EnvMap
+		b        EnvMap
 		expected bool
 	}{
 		{
 			name:     "equal maps",
-			a:        envMap{"key1": "val1", "key2": "val2"},
-			b:        envMap{"key1": "val1", "key2": "val2"},
+			a:        EnvMap{"key1": "val1", "key2": "val2"},
+			b:        EnvMap{"key1": "val1", "key2": "val2"},
 			expected: true,
 		},
 		{
 			name:     "different values",
-			a:        envMap{"key1": "val1", "key2": "val2"},
-			b:        envMap{"key1": "val1", "key2": "different"},
+			a:        EnvMap{"key1": "val1", "key2": "val2"},
+			b:        EnvMap{"key1": "val1", "key2": "different"},
 			expected: false,
 		},
 		{
 			name:     "different keys",
-			a:        envMap{"key1": "val1"},
-			b:        envMap{"key2": "val1"},
+			a:        EnvMap{"key1": "val1"},
+			b:        EnvMap{"key2": "val1"},
 			expected: false,
 		},
 		{
 			name:     "both empty",
-			a:        envMap{},
-			b:        envMap{},
+			a:        EnvMap{},
+			b:        EnvMap{},
 			expected: true,
 		},
 	}

@@ -7,24 +7,14 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	"github.com/snyk/go-application-framework/pkg/ui"
+	"github.com/snyk/go-application-framework/pkg/utils"
+	"github.com/snyk/studio-mcp/shared"
 )
 
-const (
-	ConfigureParam      = "configure"
-	RuleTypeParam       = "rule-type"
-	RuleTypeSmart       = "smart-apply"
-	RuleTypeAlwaysApply = "always-apply"
-	TrustedFoldersParam = "trusted-folders"
-	IdeConfigPathParam  = "ide-config-path"
-	GlobalRuleParam     = "global-rule"
-	WorkspacePath       = "workspace"
-	serverNameKey       = "Snyk"
-)
-
-//go:embed rules/always_apply.md
+//go:embed rules/sast/always_apply.md
 var snykRulesAlwaysApply string
 
-//go:embed rules/smart_apply.md
+//go:embed rules/sast/smart_apply.md
 var snykRulesSmartApply string
 
 // Configure sets up MCP server and rules for the specified IDE host.
@@ -34,16 +24,26 @@ var snykRulesSmartApply string
 //   - setGlobalRules: if true, writes rules globally; if false, writes to workspacePath
 //   - workspacePath: path to workspace for local rules (ignored if setGlobalRules is true)
 func Configure(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, cliPath string) error {
-	hostName := config.GetString(ConfigureParam)
-	ruleType := config.GetString(RuleTypeParam)
-	setGlobalRules := config.GetBool(GlobalRuleParam)
-	workspacePath := config.GetString(WorkspacePath)
+	hostName := config.GetString(shared.ToolNameParam)
+	ruleType := config.GetString(shared.RuleTypeParam)
+	rulesScope := config.GetString(shared.RulesScopeParam)
+	workspacePath := config.GetString(shared.WorkspacePath)
+	configCallback := config.Get(shared.McpConfigureCallback)
+
+	var configureMcpCallbackFunc shared.ConfigCallBack
+	if configCallback != nil {
+		callbackFunc, ok := configCallback.(shared.ConfigCallBack)
+		if !ok {
+			return fmt.Errorf("invalid config callback type: %T", configCallback)
+		}
+		configureMcpCallbackFunc = callbackFunc
+	}
 
 	if userInterface != nil {
 		_ = userInterface.Output(fmt.Sprintf("\n🔧 Configuring Snyk MCP for %s...\n", hostName))
 	}
 
-	cmd, args := determineCommand(cliPath)
+	cmd, args := determineCommand(cliPath, config.GetString(configuration.INTEGRATION_NAME))
 
 	// Get IDE configuration
 	ideConf, err := getHostConfig(hostName)
@@ -51,14 +51,14 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 		return err
 	}
 
-	// Configure MCP server in JSON
-	if ideConf.mcpConfigPath != "" {
+	env := getSnykMcpEnv(config)
+
+	if ideConf.mcpGlobalConfigPath != "" {
 		if userInterface != nil {
-			_ = userInterface.Output(fmt.Sprintf("📝 Configuring MCP server at: %s", ideConf.mcpConfigPath))
+			_ = userInterface.Output(fmt.Sprintf("📝 Configuring MCP server at: %s", ideConf.mcpGlobalConfigPath))
 		}
 
-		env := getSnykMcpEnv(config)
-		err = ensureMcpServerInJson(ideConf.mcpConfigPath, serverNameKey, cmd, args, env, logger)
+		err = ensureMcpServerInJson(ideConf.mcpGlobalConfigPath, shared.ServerNameKey, cmd, args, env, logger)
 		if err != nil {
 			return fmt.Errorf("failed to configure MCP server for %s: %w", ideConf.name, err)
 		}
@@ -66,20 +66,27 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully configured MCP server for %s", ideConf.name))
 		}
-		logger.Info().Msgf("Successfully configured MCP server for %s at %s", ideConf.name, ideConf.mcpConfigPath)
+		logger.Info().Msgf("Successfully configured MCP server for %s at %s", ideConf.name, ideConf.mcpGlobalConfigPath)
+	}
+
+	if configureMcpCallbackFunc != nil {
+		err = configureMcpCallbackFunc(cmd, args, env)
+		if err != nil {
+			logger.Error().Err(err).Msgf("failed to trigger MCP configure callback for %s", ideConf.name)
+		}
 	}
 
 	// Configure rules
 	var rulesContent string
-	if ruleType == RuleTypeAlwaysApply {
+	if ruleType == shared.RuleTypeAlwaysApply {
 		rulesContent = snykRulesAlwaysApply
-	} else if ruleType == RuleTypeSmart {
+	} else if ruleType == shared.RuleTypeSmart {
 		rulesContent = snykRulesSmartApply
 	} else {
-		return fmt.Errorf("invalid rule type: %s. supported values are %s, %s", ruleType, RuleTypeAlwaysApply, RuleTypeSmart)
+		return fmt.Errorf("invalid rule type: %s. supported values are %s, %s", ruleType, shared.RuleTypeAlwaysApply, shared.RuleTypeSmart)
 	}
 
-	if setGlobalRules && ideConf.globalRulesPath != "" {
+	if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
 		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing global rules (%s) to: %s", ruleType, ideConf.globalRulesPath))
 		}
@@ -95,11 +102,12 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 		logger.Info().Msgf("Successfully wrote global rules for %s at %s", ideConf.name, ideConf.globalRulesPath)
 	}
 
-	if !setGlobalRules && ideConf.localRulesPath != "" && workspacePath != "" {
+	if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
 		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing local rules (%s) to workspace: %s", ruleType, workspacePath))
 		}
 
+		// TODO: implement .gitignore here
 		err = writeLocalRules(workspacePath, ideConf.localRulesPath, rulesContent, logger)
 		if err != nil {
 			return fmt.Errorf("failed to write local rules for %s: %w", ideConf.name, err)
@@ -122,11 +130,9 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 }
 
 // determineCommand returns the command and args based on execution context
-func determineCommand(cliPath string) (string, []string) {
-	if isExecutedViaNPMContext() {
-		// For npm context: npx -y snyk@latest mcp -t stdio
+func determineCommand(cliPath, integrationName string) (string, []string) {
+	if utils.IsRunningFromNpm(integrationName) {
 		return "npx", []string{"-y", "snyk@latest", "mcp", "-t", "stdio"}
 	}
-	// For regular execution: <cliPath> mcp -t stdio
 	return cliPath, []string{"mcp", "-t", "stdio"}
 }

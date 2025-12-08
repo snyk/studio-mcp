@@ -8,14 +8,13 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/snyk/studio-mcp/shared"
 )
 
-type envMap map[string]string
-
 type McpServer struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-	Env     envMap   `json:"env"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
 }
 
 // McpConfig represents the MCP configuration structure for testing and validation
@@ -25,7 +24,7 @@ type McpConfig struct {
 
 // ensureMcpServerInJson creates or updates MCP server configuration in a JSON file
 // This function preserves all other fields in the JSON file
-func ensureMcpServerInJson(filePath, serverKey, command string, args []string, env envMap, logger *zerolog.Logger) error {
+func ensureMcpServerInJson(filePath, serverKey, command string, args []string, env shared.EnvMap, logger *zerolog.Logger) error {
 	// Use a generic map to preserve all existing fields
 	var config map[string]interface{}
 
@@ -79,7 +78,7 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 	}
 
 	// Merge environment variables from existing env
-	var existingEnvMap envMap
+	var existingEnvMap shared.EnvMap
 	if envRaw, ok := existingServerMap["env"]; ok {
 		if envBytes, err := json.Marshal(envRaw); err == nil {
 			_ = json.Unmarshal(envBytes, &existingEnvMap)
@@ -135,7 +134,7 @@ func findServerKeyInGenericMap(servers map[string]interface{}, serverKey string)
 }
 
 // mergeEnv merges environment variables, overriding Snyk-specific keys
-func mergeEnv(existing, new envMap) envMap {
+func mergeEnv(existing, new shared.EnvMap) shared.EnvMap {
 	resultingEnv := existing
 
 	// Override Snyk-specific keys

@@ -38,6 +38,7 @@ import (
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
+	"github.com/snyk/studio-mcp/shared"
 )
 
 const (
@@ -239,7 +240,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 
 		output = m.enhanceOutput(&logger, toolDef, output, err == nil, workingDir, includeIgnores)
 
-		if invocationCtx.GetConfiguration().IsSet(OutputDirParam) {
+		if invocationCtx.GetConfiguration().IsSet(shared.OutputDirParam) {
 			filePath, fileErr := handleFileOutput(logger, invocationCtx, workingDir, toolDef, output)
 			if fileErr != nil {
 				return nil, fileErr
@@ -252,7 +253,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 }
 
 func handleFileOutput(logger zerolog.Logger, invocationCtx workflow.InvocationContext, workingDir string, toolDef SnykMcpToolsDefinition, toolOutput string) (string, error) {
-	outputDir := invocationCtx.GetConfiguration().GetString(OutputDirParam)
+	outputDir := invocationCtx.GetConfiguration().GetString(shared.OutputDirParam)
 	baseDirName := filepath.Base(workingDir)
 	fileName := fmt.Sprintf("scan_output_%s_%s.json", baseDirName, toolDef.Name)
 	var path string
