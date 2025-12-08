@@ -17,6 +17,12 @@ const (
 // writeLocalRules writes rules to a workspace-relative path
 func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logger *zerolog.Logger) error {
 	rulesPath := filepath.Join(workspacePath, relativeRulesPath)
+	if workspacePath != "" {
+		isPathSymlink, err := isSymlink(rulesPath)
+		if err == nil && isPathSymlink {
+			return fmt.Errorf("using symlinks for paths is not supported: %s", rulesPath)
+		}
+	}
 
 	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
 		return fmt.Errorf("failed to create rules directory: %w", err)

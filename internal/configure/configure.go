@@ -19,7 +19,7 @@ var snykRulesSmartApply string
 
 // Configure sets up MCP server and rules for the specified IDE host.
 // Parameters:
-//   - invocatioanCtx: workflow invocation context
+//   - invocationCtx: workflow invocation context
 //   - cliPath: path to the Snyk CLI executable
 //   - setGlobalRules: if true, writes rules globally; if false, writes to workspacePath
 //   - workspacePath: path to workspace for local rules (ignored if setGlobalRules is true)
