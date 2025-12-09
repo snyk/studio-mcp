@@ -10,6 +10,7 @@ const (
 	WorkspacePath        = "workspace"
 	ServerNameKey        = "Snyk"
 	McpConfigureCallback = "mcp-configure-callback"
+	RemoveParam          = "rm"
 
 	RulesGlobalScope    = "global"
 	RulesWorkspaceScope = "workspace"

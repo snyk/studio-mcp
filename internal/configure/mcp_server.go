@@ -83,6 +83,8 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 		if envBytes, err := json.Marshal(envRaw); err == nil {
 			_ = json.Unmarshal(envBytes, &existingEnvMap)
 		}
+	} else {
+		existingEnvMap = make(map[string]string)
 	}
 	resultingEnv := mergeEnv(existingEnvMap, env)
 
@@ -110,6 +112,65 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// removeMcpServerFromJson removes an MCP server from the configuration JSON file
+// This function preserves all other fields in the JSON file
+func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger) error {
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		logger.Debug().Msgf("Config file does not exist: %s, nothing to remove", filePath)
+		return nil
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Get mcpServers section
+	serversRaw, ok := config["mcpServers"]
+	if !ok {
+		logger.Debug().Msg("No mcpServers section found, nothing to remove")
+		return nil
+	}
+
+	mcpServers, ok := serversRaw.(map[string]interface{})
+	if !ok {
+		logger.Debug().Msg("mcpServers is not a valid object, nothing to remove")
+		return nil
+	}
+
+	// Find matching server key (case-insensitive)
+	keyToRemove := findServerKeyInGenericMap(mcpServers, serverKey)
+
+	// Check if server exists
+	if _, exists := mcpServers[keyToRemove]; !exists {
+		logger.Debug().Msgf("Server '%s' not found in config, nothing to remove", serverKey)
+		return nil
+	}
+
+	// Remove the server
+	delete(mcpServers, keyToRemove)
+	config["mcpServers"] = mcpServers
+
+	// Write updated config
+	data, err = json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}

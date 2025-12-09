@@ -43,6 +43,24 @@ func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logg
 	return nil
 }
 
+// removeLocalRules removes the local rules file from the workspace
+func removeLocalRules(workspacePath, relativeRulesPath string, logger *zerolog.Logger) error {
+	rulesPath := filepath.Join(workspacePath, relativeRulesPath)
+
+	// Check if file exists
+	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
+		logger.Debug().Msgf("Local rules file does not exist at %s, nothing to remove", rulesPath)
+		return nil
+	}
+
+	if err := os.Remove(rulesPath); err != nil {
+		return fmt.Errorf("failed to remove local rules: %w", err)
+	}
+
+	logger.Debug().Msgf("Removed local rules from %s", rulesPath)
+	return nil
+}
+
 // writeGlobalRules writes rules to a global location with delimited markers
 func writeGlobalRules(targetFile, rulesContent string, logger *zerolog.Logger) error {
 	if err := os.MkdirAll(filepath.Dir(targetFile), 0755); err != nil {
@@ -69,6 +87,63 @@ func writeGlobalRules(targetFile, rulesContent string, logger *zerolog.Logger) e
 
 	logger.Debug().Msgf("Upserted delimited global rules into %s", targetFile)
 	return nil
+}
+
+// removeGlobalRules removes the Snyk rules block from the global rules file
+func removeGlobalRules(targetFile string, logger *zerolog.Logger) error {
+	// Check if file exists
+	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
+		logger.Debug().Msgf("Global rules file does not exist at %s, nothing to remove", targetFile)
+		return nil
+	}
+
+	data, err := os.ReadFile(targetFile)
+	if err != nil {
+		return fmt.Errorf("failed to read global rules file: %w", err)
+	}
+
+	current := string(data)
+	updated := removeDelimitedBlock(current, RuleStart, RuleEnd)
+
+	if updated == current {
+		logger.Debug().Msgf("No Snyk rules block found in %s, nothing to remove", targetFile)
+		return nil
+	}
+
+	if writeErr := os.WriteFile(targetFile, []byte(updated), 0644); writeErr != nil {
+		return fmt.Errorf("failed to write updated global rules: %w", writeErr)
+	}
+
+	logger.Debug().Msgf("Removed Snyk rules block from %s", targetFile)
+	return nil
+}
+
+// removeDelimitedBlock removes a delimited block from the content
+func removeDelimitedBlock(source, start, end string) string {
+	// Normalize newlines to \n
+	src := strings.ReplaceAll(source, "\r\n", "\n")
+
+	startIdx := strings.Index(src, start)
+	endIdx := strings.Index(src, end)
+
+	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
+		// No block found
+		return source
+	}
+
+	// Remove from start marker to end marker (inclusive of the end marker)
+	before := src[:startIdx]
+	after := src[endIdx+len(end):]
+
+	// Clean up extra newlines
+	result := trimTrailingNewlines(before) + trimLeadingNewlines(after)
+
+	// Ensure single trailing newline if there's content
+	if len(strings.TrimSpace(result)) > 0 {
+		result = strings.TrimRight(result, "\n\r ") + "\n"
+	}
+
+	return result
 }
 
 // upsertDelimitedBlock replaces or appends a delimited block inside a file content

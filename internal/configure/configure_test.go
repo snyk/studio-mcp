@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,62 +23,81 @@ func TestUpsertDelimitedBlock(t *testing.T) {
 		{
 			name:     "empty source",
 			source:   "",
-			expected: "<!--# BEGIN SNYK GLOBAL RULE-->\ntest content\n<!--# END SNYK GLOBAL RULE-->\n",
+			expected: RuleStart + "\ntest content\n" + RuleEnd + "\n",
 		},
 		{
 			name:     "source without markers",
 			source:   "existing content\n",
-			expected: "existing content\n\n<!--# BEGIN SNYK GLOBAL RULE-->\ntest content\n<!--# END SNYK GLOBAL RULE-->\n",
+			expected: "existing content\n\n" + RuleStart + "\ntest content\n" + RuleEnd + "\n",
 		},
 		{
 			name:     "source with markers",
-			source:   "before\n<!--# BEGIN SNYK GLOBAL RULE-->\nold content\n<!--# END SNYK GLOBAL RULE-->\nafter\n",
-			expected: "before\n<!--# BEGIN SNYK GLOBAL RULE-->\ntest content\n<!--# END SNYK GLOBAL RULE-->\nafter\n",
+			source:   "before\n" + RuleStart + "\nold content\n" + RuleEnd + "\nafter\n",
+			expected: "before\n" + RuleStart + "\ntest content\n" + RuleEnd + "\nafter\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			block := "<!--# BEGIN SNYK GLOBAL RULE-->\ntest content\n<!--# END SNYK GLOBAL RULE-->\n"
+			block := RuleStart + "\ntest content\n" + RuleEnd + "\n"
 			result := upsertDelimitedBlock(tt.source, RuleStart, RuleEnd, block)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestGetIdeConfig(t *testing.T) {
+func TestGetHostConfig(t *testing.T) {
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
 
 	tests := []struct {
-		name         string
-		hostName     string
-		expectError  bool
-		expectedName string
+		name                  string
+		hostName              string
+		expectError           bool
+		expectedName          string
+		expectMcpGlobalConfig bool
+		expectLocalRulesPath  bool
+		expectGlobalRulesPath bool
 	}{
 		{
-			name:         "cursor",
-			hostName:     "cursor",
-			expectError:  false,
-			expectedName: "Cursor",
+			name:                  "cursor",
+			hostName:              "cursor",
+			expectError:           false,
+			expectedName:          "cursor",
+			expectMcpGlobalConfig: true,
+			expectLocalRulesPath:  true,
 		},
 		{
-			name:         "windsurf",
-			hostName:     "windsurf",
-			expectError:  false,
-			expectedName: "Windsurf",
+			name:                  "windsurf",
+			hostName:              "windsurf",
+			expectError:           false,
+			expectedName:          "windsurf",
+			expectMcpGlobalConfig: true,
+			expectLocalRulesPath:  true,
 		},
 		{
-			name:         "antigravity",
-			hostName:     "antigravity",
-			expectError:  false,
-			expectedName: "Antigravity",
+			name:                  "antigravity",
+			hostName:              "antigravity",
+			expectError:           false,
+			expectedName:          "antigravity",
+			expectMcpGlobalConfig: true,
+			expectLocalRulesPath:  true,
 		},
 		{
-			name:         "copilot",
-			hostName:     "copilot",
-			expectError:  false,
-			expectedName: "Copilot",
+			name:                  "gemini-cli",
+			hostName:              "gemini-cli",
+			expectError:           false,
+			expectedName:          "gemini-cli",
+			expectMcpGlobalConfig: true,
+			expectGlobalRulesPath: true,
+		},
+		{
+			name:                  "claude-cli",
+			hostName:              "claude-cli",
+			expectError:           false,
+			expectedName:          "claude-cli",
+			expectMcpGlobalConfig: true,
+			expectGlobalRulesPath: true,
 		},
 		{
 			name:        "unsupported",
@@ -95,12 +116,17 @@ func TestGetIdeConfig(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedName, config.name)
 
-			// Verify paths are properly set
-			if tt.hostName != "copilot" {
+			if tt.expectMcpGlobalConfig {
 				assert.NotEmpty(t, config.mcpGlobalConfigPath)
 				assert.Contains(t, config.mcpGlobalConfigPath, homeDir)
 			}
-			assert.NotEmpty(t, config.localRulesPath)
+			if tt.expectLocalRulesPath {
+				assert.NotEmpty(t, config.localRulesPath)
+			}
+			if tt.expectGlobalRulesPath {
+				assert.NotEmpty(t, config.globalRulesPath)
+				assert.Contains(t, config.globalRulesPath, homeDir)
+			}
 		})
 	}
 }
@@ -109,7 +135,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "mcp.json")
 
-	env := EnvMap{
+	env := shared.McpEnvMap{
 		"SNYK_CFG_ORG": "test-org",
 		"SNYK_API":     "https://api.snyk.io",
 	}
@@ -141,7 +167,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 	})
 
 	t.Run("updates existing config", func(t *testing.T) {
-		newEnv := EnvMap{
+		newEnv := shared.McpEnvMap{
 			"SNYK_CFG_ORG": "updated-org",
 			"SNYK_API":     "https://api.snyk.io",
 		}
@@ -174,7 +200,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		config.McpServers["OtherServer"] = McpServer{
 			Command: "/other/cli",
 			Args:    []string{"arg1"},
-			Env:     EnvMap{"KEY": "value"},
+			Env:     shared.McpEnvMap{"KEY": "value"},
 		}
 
 		data, err = json.MarshalIndent(config, "", "  ")
@@ -222,7 +248,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Update Snyk server
-		newEnv := EnvMap{"SNYK_CFG_ORG": "updated-org"}
+		newEnv := shared.McpEnvMap{"SNYK_CFG_ORG": "updated-org"}
 		err = ensureMcpServerInJson(configPath, "Snyk", "/updated/path", []string{"mcp", "-t", "stdio"}, newEnv, logger)
 		require.NoError(t, err)
 
@@ -278,7 +304,7 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Update only command and env
-		newEnv := EnvMap{"SNYK_CFG_ORG": "updated-org", "SNYK_API": "https://api.snyk.io"}
+		newEnv := shared.McpEnvMap{"SNYK_CFG_ORG": "updated-org", "SNYK_API": "https://api.snyk.io"}
 		err = ensureMcpServerInJson(configPath, "Snyk", "/updated/cli", []string{"mcp", "-t", "stdio"}, newEnv, logger)
 		require.NoError(t, err)
 
@@ -449,32 +475,32 @@ func TestStringSlicesEqual(t *testing.T) {
 func TestEnvMapsEqual(t *testing.T) {
 	tests := []struct {
 		name     string
-		a        EnvMap
-		b        EnvMap
+		a        shared.McpEnvMap
+		b        shared.McpEnvMap
 		expected bool
 	}{
 		{
 			name:     "equal maps",
-			a:        EnvMap{"key1": "val1", "key2": "val2"},
-			b:        EnvMap{"key1": "val1", "key2": "val2"},
+			a:        shared.McpEnvMap{"key1": "val1", "key2": "val2"},
+			b:        shared.McpEnvMap{"key1": "val1", "key2": "val2"},
 			expected: true,
 		},
 		{
 			name:     "different values",
-			a:        EnvMap{"key1": "val1", "key2": "val2"},
-			b:        EnvMap{"key1": "val1", "key2": "different"},
+			a:        shared.McpEnvMap{"key1": "val1", "key2": "val2"},
+			b:        shared.McpEnvMap{"key1": "val1", "key2": "different"},
 			expected: false,
 		},
 		{
 			name:     "different keys",
-			a:        EnvMap{"key1": "val1"},
-			b:        EnvMap{"key2": "val1"},
+			a:        shared.McpEnvMap{"key1": "val1"},
+			b:        shared.McpEnvMap{"key2": "val1"},
 			expected: false,
 		},
 		{
 			name:     "both empty",
-			a:        EnvMap{},
-			b:        EnvMap{},
+			a:        shared.McpEnvMap{},
+			b:        shared.McpEnvMap{},
 			expected: true,
 		},
 	}
@@ -485,36 +511,6 @@ func TestEnvMapsEqual(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestIsExecutedViaNPMContext(t *testing.T) {
-	t.Run("detects npm_execpath", func(t *testing.T) {
-		os.Setenv("npm_execpath", "/usr/bin/npm")
-		defer os.Unsetenv("npm_execpath")
-
-		result := isExecutedViaNPMContext()
-		assert.True(t, result)
-	})
-
-	t.Run("detects _npx in path", func(t *testing.T) {
-		os.Unsetenv("npm_execpath")
-		originalArgs := os.Args
-		defer func() { os.Args = originalArgs }()
-
-		os.Args = []string{"/home/user/.npm/_npx/12345/bin/snyk"}
-		result := isExecutedViaNPMContext()
-		assert.True(t, result)
-	})
-
-	t.Run("returns false when not in npm context", func(t *testing.T) {
-		os.Unsetenv("npm_execpath")
-		originalArgs := os.Args
-		defer func() { os.Args = originalArgs }()
-
-		os.Args = []string{"/usr/local/bin/snyk"}
-		result := isExecutedViaNPMContext()
-		assert.False(t, result)
-	})
 }
 
 func TestTrimFunctions(t *testing.T) {
@@ -552,4 +548,334 @@ func TestTrimFunctions(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		}
 	})
+}
+
+func TestRemoveMcpServerFromJson(t *testing.T) {
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+
+	t.Run("removes server from config", func(t *testing.T) {
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "mcp.json")
+
+		// Create a config with Snyk server
+		config := map[string]interface{}{
+			"mcpServers": map[string]interface{}{
+				"Snyk": map[string]interface{}{
+					"command": "/path/to/cli",
+					"args":    []string{"mcp", "-t", "stdio"},
+				},
+				"OtherServer": map[string]interface{}{
+					"command": "/other/cli",
+					"args":    []string{"arg1"},
+				},
+			},
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		require.NoError(t, err)
+		err = os.WriteFile(configPath, data, 0644)
+		require.NoError(t, err)
+
+		// Remove Snyk server
+		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		require.NoError(t, err)
+
+		// Verify Snyk was removed but OtherServer remains
+		data, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+
+		mcpServers := result["mcpServers"].(map[string]interface{})
+		assert.NotContains(t, mcpServers, "Snyk")
+		assert.Contains(t, mcpServers, "OtherServer")
+	})
+
+	t.Run("preserves other root-level fields", func(t *testing.T) {
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "mcp.json")
+
+		// Create a config with additional fields
+		config := map[string]interface{}{
+			"customField": "customValue",
+			"settings": map[string]interface{}{
+				"enabled": true,
+			},
+			"mcpServers": map[string]interface{}{
+				"Snyk": map[string]interface{}{
+					"command": "/path/to/cli",
+				},
+			},
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		require.NoError(t, err)
+		err = os.WriteFile(configPath, data, 0644)
+		require.NoError(t, err)
+
+		// Remove Snyk server
+		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		require.NoError(t, err)
+
+		// Verify other fields are preserved
+		data, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+
+		assert.Equal(t, "customValue", result["customField"])
+		assert.NotNil(t, result["settings"])
+	})
+
+	t.Run("handles non-existent file gracefully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "nonexistent.json")
+
+		err := removeMcpServerFromJson(configPath, "Snyk", logger)
+		require.NoError(t, err)
+	})
+
+	t.Run("handles non-existent server gracefully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "mcp.json")
+
+		// Create a config without Snyk server
+		config := map[string]interface{}{
+			"mcpServers": map[string]interface{}{
+				"OtherServer": map[string]interface{}{
+					"command": "/other/cli",
+				},
+			},
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		require.NoError(t, err)
+		err = os.WriteFile(configPath, data, 0644)
+		require.NoError(t, err)
+
+		// Try to remove non-existent Snyk server
+		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		require.NoError(t, err)
+
+		// Verify OtherServer still exists
+		data, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+
+		mcpServers := result["mcpServers"].(map[string]interface{})
+		assert.Contains(t, mcpServers, "OtherServer")
+	})
+
+	t.Run("case-insensitive server key matching", func(t *testing.T) {
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "mcp.json")
+
+		// Create a config with lowercase "snyk" server
+		config := map[string]interface{}{
+			"mcpServers": map[string]interface{}{
+				"snyk": map[string]interface{}{
+					"command": "/path/to/cli",
+				},
+			},
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		require.NoError(t, err)
+		err = os.WriteFile(configPath, data, 0644)
+		require.NoError(t, err)
+
+		// Remove using "Snyk" (different case)
+		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		require.NoError(t, err)
+
+		// Verify server was removed
+		data, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+
+		mcpServers := result["mcpServers"].(map[string]interface{})
+		assert.NotContains(t, mcpServers, "snyk")
+		assert.NotContains(t, mcpServers, "Snyk")
+	})
+}
+
+func TestRemoveLocalRules(t *testing.T) {
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+
+	t.Run("removes existing local rules file", func(t *testing.T) {
+		tempDir := t.TempDir()
+		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
+		fullPath := filepath.Join(tempDir, relativeRulesPath)
+
+		// Create the rules file
+		err := os.MkdirAll(filepath.Dir(fullPath), 0755)
+		require.NoError(t, err)
+		err = os.WriteFile(fullPath, []byte("# Test Rules"), 0644)
+		require.NoError(t, err)
+
+		// Verify file exists
+		assert.FileExists(t, fullPath)
+
+		// Remove the rules
+		err = removeLocalRules(tempDir, relativeRulesPath, logger)
+		require.NoError(t, err)
+
+		// Verify file was removed
+		_, err = os.Stat(fullPath)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("handles non-existent file gracefully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
+
+		// Try to remove non-existent file
+		err := removeLocalRules(tempDir, relativeRulesPath, logger)
+		require.NoError(t, err)
+	})
+}
+
+func TestRemoveGlobalRules(t *testing.T) {
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+
+	t.Run("removes snyk block from file with other content", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "global_rules.md")
+
+		// Create file with Snyk block and other content
+		content := "# Other Rules\nSome other content\n\n" + RuleStart + "\n# Snyk Rules\nRule 1\n" + RuleEnd + "\n\n# More content\nMore rules\n"
+		err := os.WriteFile(targetFile, []byte(content), 0644)
+		require.NoError(t, err)
+
+		// Remove Snyk rules
+		err = removeGlobalRules(targetFile, logger)
+		require.NoError(t, err)
+
+		// Verify Snyk block was removed but other content remains
+		result, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		resultStr := string(result)
+
+		assert.NotContains(t, resultStr, RuleStart)
+		assert.NotContains(t, resultStr, RuleEnd)
+		assert.NotContains(t, resultStr, "# Snyk Rules")
+		assert.Contains(t, resultStr, "# Other Rules")
+		assert.Contains(t, resultStr, "# More content")
+	})
+
+	t.Run("removes all content when file only has snyk block", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "global_rules.md")
+
+		// Create file with only Snyk block
+		content := RuleStart + "\n# Snyk Rules\nRule 1\n" + RuleEnd + "\n"
+		err := os.WriteFile(targetFile, []byte(content), 0644)
+		require.NoError(t, err)
+
+		// Remove Snyk rules
+		err = removeGlobalRules(targetFile, logger)
+		require.NoError(t, err)
+
+		// Verify file is either deleted or empty
+		data, err := os.ReadFile(targetFile)
+		if err == nil {
+			// File exists - verify it's empty or only whitespace
+			assert.Empty(t, strings.TrimSpace(string(data)))
+		} else {
+			// File was deleted - that's also acceptable
+			assert.True(t, os.IsNotExist(err))
+		}
+	})
+
+	t.Run("handles non-existent file gracefully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "nonexistent.md")
+
+		err := removeGlobalRules(targetFile, logger)
+		require.NoError(t, err)
+	})
+
+	t.Run("handles file without snyk block gracefully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "global_rules.md")
+
+		// Create file without Snyk block
+		content := "# Other Rules\nSome content\n"
+		err := os.WriteFile(targetFile, []byte(content), 0644)
+		require.NoError(t, err)
+
+		// Try to remove Snyk rules
+		err = removeGlobalRules(targetFile, logger)
+		require.NoError(t, err)
+
+		// Verify file content unchanged
+		result, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		assert.Equal(t, content, string(result))
+	})
+}
+
+func TestRemoveDelimitedBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		expected string
+	}{
+		{
+			name:     "removes block from middle",
+			source:   "before\n" + RuleStart + "\ncontent\n" + RuleEnd + "\nafter\n",
+			expected: "beforeafter\n",
+		},
+		{
+			name:     "removes block from start",
+			source:   RuleStart + "\ncontent\n" + RuleEnd + "\nafter\n",
+			expected: "after\n",
+		},
+		{
+			name:     "removes block from end",
+			source:   "before\n" + RuleStart + "\ncontent\n" + RuleEnd,
+			expected: "before\n",
+		},
+		{
+			name:     "returns unchanged if no block",
+			source:   "some content\nmore content\n",
+			expected: "some content\nmore content\n",
+		},
+		{
+			name:     "returns unchanged if only start marker",
+			source:   "content\n" + RuleStart + "\nmore content\n",
+			expected: "content\n" + RuleStart + "\nmore content\n",
+		},
+		{
+			name:     "returns unchanged if only end marker",
+			source:   "content\n" + RuleEnd + "\nmore content\n",
+			expected: "content\n" + RuleEnd + "\nmore content\n",
+		},
+		{
+			name:     "handles empty source",
+			source:   "",
+			expected: "",
+		},
+		{
+			name:     "removes entire content when only block exists",
+			source:   RuleStart + "\ncontent\n" + RuleEnd + "\n",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeDelimitedBlock(tt.source, RuleStart, RuleEnd)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
