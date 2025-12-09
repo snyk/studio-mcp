@@ -11,6 +11,8 @@ const (
 	ServerNameKey        = "Snyk"
 	McpConfigureCallback = "mcp-configure-callback"
 	RemoveParam          = "rm"
+	ConfigureMcpParam    = "configure-mcp"   // Flag to enable/disable MCP server configuration
+	ConfigureRulesParam  = "configure-rules" // Flag to enable/disable rules configuration
 
 	RulesGlobalScope    = "global"
 	RulesWorkspaceScope = "workspace"

@@ -43,6 +43,7 @@ func getHostConfig(hostName string) (*hostConfig, error) {
 		}, nil
 	case "visual studio code":
 	case "visual studio code - insider":
+	case "vs_code":
 		return &hostConfig{
 			name:           hostName,
 			localRulesPath: filepath.Join(".github", "instructions", "snyk_rules.instructions.md"),
@@ -60,5 +61,5 @@ func getHostConfig(hostName string) (*hostConfig, error) {
 			globalRulesPath:     filepath.Join(homeDir, ".claude", "CLAUDE.md"),
 		}, nil
 	}
-	return nil, fmt.Errorf("unsupported Host: %s", hostName)
+	return nil, fmt.Errorf("unsupported Tool: %s", hostName)
 }

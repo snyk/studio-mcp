@@ -55,6 +55,8 @@ func Init(engine workflow.Engine) error {
 	configureFlags.String(shared.WorkspacePath, "", "workspace path for local rules (defaults to current directory)")
 	configureFlags.String(shared.RuleTypeParam, shared.RuleTypeAlwaysApply, "choose rule type to write <always-apply|smart-apply>. default always-apply")
 	configureFlags.Bool(shared.RemoveParam, false, "remove the Snyk MCP server from the specified tool configuration")
+	configureFlags.Bool(shared.ConfigureMcpParam, true, "configure MCP server in tool's config file (default true)")
+	configureFlags.Bool(shared.ConfigureRulesParam, true, "configure Snyk rules for the tool (default true)")
 
 	mcpCfg := workflow.ConfigurationOptionsFromFlagset(mcpFlags)
 	entry, _ := engine.Register(WORKFLOWID_MCP, mcpCfg, mcpWorkflow)

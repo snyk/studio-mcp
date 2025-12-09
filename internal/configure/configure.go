@@ -46,69 +46,58 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 func removeConfiguration(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, ideConf *hostConfig) error {
 	rulesScope := config.GetString(shared.RulesScopeParam)
 	workspacePath := config.GetString(shared.WorkspacePath)
+	configureMcp := config.GetBool(shared.ConfigureMcpParam)
+	configureRules := config.GetBool(shared.ConfigureRulesParam)
 
-	if userInterface != nil {
-		_ = userInterface.Output(fmt.Sprintf("\n🗑️  Removing Snyk MCP configuration from %s...\n", ideConf.name))
-	}
+	_ = userInterface.Output(fmt.Sprintf("\n🗑️  Removing Snyk MCP configuration from %s...\n", ideConf.name))
 
-	// Remove MCP server from config
-	if ideConf.mcpGlobalConfigPath != "" {
-		if userInterface != nil {
+	// Remove MCP server from config (only if configureMcp is true)
+	if configureMcp {
+		if ideConf.mcpGlobalConfigPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📝 Removing MCP server from: %s", ideConf.mcpGlobalConfigPath))
-		}
 
-		err := removeMcpServerFromJson(ideConf.mcpGlobalConfigPath, shared.ServerNameKey, logger)
-		if err != nil {
-			return fmt.Errorf("failed to remove MCP server for %s: %w", ideConf.name, err)
-		}
+			err := removeMcpServerFromJson(ideConf.mcpGlobalConfigPath, shared.ServerNameKey, logger)
+			if err != nil {
+				return fmt.Errorf("failed to remove MCP server for %s: %w", ideConf.name, err)
+			}
 
-		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed MCP server for %s", ideConf.name))
+			logger.Info().Msgf("Successfully removed MCP server for %s from %s", ideConf.name, ideConf.mcpGlobalConfigPath)
 		}
-		logger.Info().Msgf("Successfully removed MCP server for %s from %s", ideConf.name, ideConf.mcpGlobalConfigPath)
 	}
 
-	// Remove global rules
-	if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
-		if userInterface != nil {
+	// Remove global rules (only if configureRules is true)
+	if configureRules {
+		if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Removing global rules from: %s", ideConf.globalRulesPath))
-		}
 
-		err := removeGlobalRules(ideConf.globalRulesPath, logger)
-		if err != nil {
-			return fmt.Errorf("failed to remove global rules for %s: %w", ideConf.name, err)
-		}
+			err := removeGlobalRules(ideConf.globalRulesPath, logger)
+			if err != nil {
+				return fmt.Errorf("failed to remove global rules for %s: %w", ideConf.name, err)
+			}
 
-		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed global rules for %s", ideConf.name))
+			logger.Info().Msgf("Successfully removed global rules for %s from %s", ideConf.name, ideConf.globalRulesPath)
 		}
-		logger.Info().Msgf("Successfully removed global rules for %s from %s", ideConf.name, ideConf.globalRulesPath)
-	}
 
-	// TODO: delete from .gitignore
-
-	// Remove local rules
-	if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
-		if userInterface != nil {
+		// Remove local rules (only if configureRules is true)
+		if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Removing local rules from workspace: %s", workspacePath))
-		}
 
-		err := removeLocalRules(workspacePath, ideConf.localRulesPath, logger)
-		if err != nil {
-			return fmt.Errorf("failed to remove local rules for %s: %w", ideConf.name, err)
-		}
+			err := removeLocalRules(workspacePath, ideConf.localRulesPath, logger)
+			if err != nil {
+				return fmt.Errorf("failed to remove local rules for %s: %w", ideConf.name, err)
+			}
+			// TODO: delete from .gitignore
 
-		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed local rules for %s", ideConf.name))
+			logger.Info().Msgf("Successfully removed local rules for %s", ideConf.name)
 		}
-		logger.Info().Msgf("Successfully removed local rules for %s", ideConf.name)
 	}
 
-	if userInterface != nil {
-		_ = userInterface.Output("\n🎉 Removal complete!")
-		_ = userInterface.Output("\nNext steps:")
-		_ = userInterface.Output(fmt.Sprintf("  1. Restart %s to apply the changes", ideConf.name))
-	}
+	_ = userInterface.Output("\n🎉 Removal complete!")
+	_ = userInterface.Output("\nNext steps:")
+	_ = userInterface.Output(fmt.Sprintf("  1. Restart %s to apply the changes", ideConf.name))
 
 	return nil
 }
@@ -119,6 +108,8 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 	rulesScope := config.GetString(shared.RulesScopeParam)
 	workspacePath := config.GetString(shared.WorkspacePath)
 	configCallback := config.Get(shared.McpConfigureCallback)
+	configureMcp := config.GetBool(shared.ConfigureMcpParam)
+	configureRules := config.GetBool(shared.ConfigureRulesParam)
 
 	if workspacePath != "" {
 		isWorkspacePathSymlink, err := isSymlink(workspacePath)
@@ -136,86 +127,74 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 		configureMcpCallbackFunc = callbackFunc
 	}
 
-	if userInterface != nil {
+	// Configure MCP server (only if configureMcp is true)
+	if configureMcp {
 		_ = userInterface.Output(fmt.Sprintf("\n🔧 Configuring Snyk MCP for %s...\n", ideConf.name))
-	}
 
-	cmd, args := determineCommand(cliPath, config.GetString(configuration.INTEGRATION_NAME))
+		cmd, args := determineCommand(cliPath, config.GetString(configuration.INTEGRATION_NAME))
+		env := getSnykMcpEnv(config)
 
-	env := getSnykMcpEnv(config)
-
-	if ideConf.mcpGlobalConfigPath != "" {
-		if userInterface != nil {
+		if ideConf.mcpGlobalConfigPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📝 Configuring MCP server at: %s", ideConf.mcpGlobalConfigPath))
-		}
 
-		err := ensureMcpServerInJson(ideConf.mcpGlobalConfigPath, shared.ServerNameKey, cmd, args, env, logger)
-		if err != nil {
-			return fmt.Errorf("failed to configure MCP server for %s: %w", ideConf.name, err)
-		}
+			err := ensureMcpServerInJson(ideConf.mcpGlobalConfigPath, shared.ServerNameKey, cmd, args, env, logger)
+			if err != nil {
+				return fmt.Errorf("failed to configure MCP server for %s: %w", ideConf.name, err)
+			}
 
-		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully configured MCP server for %s", ideConf.name))
+			logger.Info().Msgf("Successfully configured MCP server for %s at %s", ideConf.name, ideConf.mcpGlobalConfigPath)
 		}
-		logger.Info().Msgf("Successfully configured MCP server for %s at %s", ideConf.name, ideConf.mcpGlobalConfigPath)
-	}
 
-	if configureMcpCallbackFunc != nil {
-		err := configureMcpCallbackFunc(cmd, args, env)
-		if err != nil {
-			logger.Error().Err(err).Msgf("failed to trigger MCP configure callback for %s", ideConf.name)
+		if configureMcpCallbackFunc != nil {
+			err := configureMcpCallbackFunc(cmd, args, env)
+			if err != nil {
+				logger.Error().Err(err).Msgf("failed to trigger MCP configure callback for %s", ideConf.name)
+			}
 		}
 	}
 
-	// Configure rules
-	var rulesContent string
-	if ruleType == shared.RuleTypeAlwaysApply {
-		rulesContent = snykRulesAlwaysApply
-	} else if ruleType == shared.RuleTypeSmart {
-		rulesContent = snykRulesSmartApply
-	} else {
-		return fmt.Errorf("invalid rule type: %s. supported values are %s, %s", ruleType, shared.RuleTypeAlwaysApply, shared.RuleTypeSmart)
-	}
+	// Configure rules (only if configureRules is true)
+	if configureRules {
+		var rulesContent string
+		if ruleType == shared.RuleTypeAlwaysApply {
+			rulesContent = snykRulesAlwaysApply
+		} else if ruleType == shared.RuleTypeSmart {
+			rulesContent = snykRulesSmartApply
+		} else {
+			return fmt.Errorf("invalid rule type: %s. supported values are %s, %s", ruleType, shared.RuleTypeAlwaysApply, shared.RuleTypeSmart)
+		}
 
-	if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
-		if userInterface != nil {
+		if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing global rules (%s) to: %s", ruleType, ideConf.globalRulesPath))
-		}
 
-		err := writeGlobalRules(ideConf.globalRulesPath, rulesContent, logger)
-		if err != nil {
-			return fmt.Errorf("failed to write global rules for %s: %w", ideConf.name, err)
-		}
+			err := writeGlobalRules(ideConf.globalRulesPath, rulesContent, logger)
+			if err != nil {
+				return fmt.Errorf("failed to write global rules for %s: %w", ideConf.name, err)
+			}
 
-		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote global rules for %s", ideConf.name))
+			logger.Info().Msgf("Successfully wrote global rules for %s at %s", ideConf.name, ideConf.globalRulesPath)
 		}
-		logger.Info().Msgf("Successfully wrote global rules for %s at %s", ideConf.name, ideConf.globalRulesPath)
-	}
 
-	if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
-		if userInterface != nil {
+		if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing local rules (%s) to workspace: %s", ruleType, workspacePath))
-		}
 
-		// TODO: implement .gitignore here
-		err := writeLocalRules(workspacePath, ideConf.localRulesPath, rulesContent, logger)
-		if err != nil {
-			return fmt.Errorf("failed to write local rules for %s: %w", ideConf.name, err)
-		}
+			// TODO: implement .gitignore here
+			err := writeLocalRules(workspacePath, ideConf.localRulesPath, rulesContent, logger)
+			if err != nil {
+				return fmt.Errorf("failed to write local rules for %s: %w", ideConf.name, err)
+			}
 
-		if userInterface != nil {
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote local rules for %s", ideConf.name))
+			logger.Info().Msgf("Successfully wrote local rules for %s", ideConf.name)
 		}
-		logger.Info().Msgf("Successfully wrote local rules for %s", ideConf.name)
 	}
 
-	if userInterface != nil {
-		_ = userInterface.Output("\n🎉 Configuration complete!")
-		_ = userInterface.Output("\nNext steps:")
-		_ = userInterface.Output(fmt.Sprintf("  1. Restart %s to apply the changes", ideConf.name))
-		_ = userInterface.Output("  2. The Snyk MCP server will be available for AI-powered security scanning")
-	}
+	_ = userInterface.Output("\n🎉 Configuration complete!")
+	_ = userInterface.Output("\nNext steps:")
+	_ = userInterface.Output(fmt.Sprintf("  1. Restart %s to apply the changes", ideConf.name))
+	_ = userInterface.Output("  2. The Snyk MCP server will be available for AI-powered security scanning")
 
 	return nil
 }
