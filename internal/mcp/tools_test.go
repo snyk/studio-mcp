@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,6 +35,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/trust"
+	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/require"
 
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -324,6 +327,199 @@ func TestSnykCodeTestHandler(t *testing.T) {
 
 			// Verify we extracted the issues successfully
 			// The actual issue verification is done in the dedicated test
+		})
+	}
+}
+
+func TestSnykCodeAutoEnablement(t *testing.T) {
+	// Test the automatic Snyk Code enablement feature when snyk-code-0005 error is encountered
+	fixture := setupTestFixture(t)
+	tmpDir := t.TempDir()
+
+	// Get the tool definition
+	toolDef := getToolWithName(t, fixture.tools, SnykCodeTest)
+	require.NotNil(t, toolDef, "snyk_code_scan tool definition not found")
+
+	testCases := []struct {
+		name              string
+		mockCliScriptFunc func() string // Function that returns script content
+		orgId             string
+		apiToken          string
+		setupMockAPI      func() string // Returns mock API server URL
+		expectedError     bool
+		expectedInOutput  []string
+		notInOutput       []string
+	}{
+		{
+			name:              "Auto-enable succeeds and retry succeeds",
+			mockCliScriptFunc: mockCliScriptErrorThenSuccess,
+			orgId:             "test-org-123",
+			apiToken:          "test-token-456",
+			setupMockAPI: func() string {
+				// Create a mock API server that returns 200 OK
+				return createMockAPIServer(t, 201, map[string]interface{}{
+					"data": map[string]interface{}{
+						"type": "sast_settings",
+						"id":   "test-org-123",
+						"attributes": map[string]interface{}{
+							"sast_enabled": true,
+						},
+					},
+				})
+			},
+			expectedError: false,
+			expectedInOutput: []string{
+				"Attempting to enable Snyk Code automatically",
+				"Snyk Code has been successfully enabled",
+				"Retrying scan automatically",
+			},
+			notInOutput: []string{
+				"Failed to enable Snyk Code",
+			},
+		},
+		{
+			name: "Auto-enable fails with 403 - provides manual instructions",
+			mockCliScriptFunc: func() string {
+				return mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is disabled")
+			},
+			orgId:    "test-org-123",
+			apiToken: "test-token-456",
+			setupMockAPI: func() string {
+				return createMockAPIServer(t, 403, map[string]interface{}{
+					"errors": []interface{}{
+						map[string]interface{}{
+							"status": "403",
+							"detail": "Forbidden",
+						},
+					},
+				})
+			},
+			expectedError: true,
+			expectedInOutput: []string{
+				"snyk-code-0005",
+				"Attempting to enable Snyk Code automatically",
+				"Failed to enable Snyk Code automatically",
+				"API request failed with status 403",
+				"To activate Snyk Code",
+			},
+			notInOutput: []string{
+				"successfully enabled",
+				"Retrying scan",
+			},
+		},
+		{
+			name: "Auto-enable succeeds but retry also fails",
+			mockCliScriptFunc: func() string {
+				return mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled")
+			},
+			orgId:    "test-org-456",
+			apiToken: "test-token-789",
+			setupMockAPI: func() string {
+				return createMockAPIServer(t, 201, map[string]interface{}{
+					"data": map[string]interface{}{
+						"type": "sast_settings",
+						"id":   "test-org-456",
+						"attributes": map[string]interface{}{
+							"sast_enabled": true,
+						},
+					},
+				})
+			},
+			expectedError: true,
+			expectedInOutput: []string{
+				"Attempting to enable Snyk Code automatically",
+				"Snyk Code has been successfully enabled",
+				"Retrying scan automatically",
+				"Retry failed",
+				"snyk-code-0005",
+			},
+			notInOutput: []string{},
+		},
+		{
+			name: "Missing org ID - no auto-enable attempt",
+			mockCliScriptFunc: func() string {
+				return mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled")
+			},
+			orgId:         "",
+			apiToken:      "test-token",
+			setupMockAPI:  func() string { return "" },
+			expectedError: true,
+			expectedInOutput: []string{
+				"snyk-code-0005",
+				"To activate Snyk Code,",
+			},
+			notInOutput: []string{
+				"Attempting to enable Snyk Code automatically",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			createMockSnykCliWithScript(t, fixture.snykCliPath, tc.mockCliScriptFunc())
+
+			config := fixture.invocationContext.GetConfiguration()
+			config.Set(configuration.ORGANIZATION, tc.orgId)
+			config.Set(configuration.AUTHENTICATION_TOKEN, tc.apiToken)
+			config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
+
+			if tc.setupMockAPI != nil {
+				apiURL := tc.setupMockAPI()
+				if apiURL != "" {
+					config.Set(configuration.API_URL, apiURL)
+				}
+			}
+
+			// Mock network access for GAF HTTP client
+			mockNetworkAccess := mocks.NewMockNetworkAccess(gomock.NewController(t))
+			mockNetworkAccess.EXPECT().GetHttpClient().Return(&http.Client{}).AnyTimes()
+			fixture.invocationContext.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+
+			handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
+
+			requestObj := map[string]any{
+				"params": map[string]any{
+					"arguments": map[string]any{
+						"path": tmpDir,
+					},
+				},
+			}
+			requestJSON, err := json.Marshal(requestObj)
+			require.NoError(t, err)
+
+			var request mcp.CallToolRequest
+			err = json.Unmarshal(requestJSON, &request)
+			require.NoError(t, err)
+
+			result, err := handler(context.Background(), request)
+
+			var resultText string
+			if result != nil && len(result.Content) > 0 {
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				resultText = textContent.Text
+			}
+			if err != nil {
+				resultText += " " + err.Error()
+			}
+
+			// error expectation
+			if tc.expectedError {
+				require.True(t, err != nil || strings.Contains(resultText, "Error:"),
+					"Expected error but got none. Result: %s", resultText)
+			} else {
+				require.NoError(t, err, "Unexpected error: %v. Result: %s", err, resultText)
+			}
+
+			// expected strings are present
+			for _, expected := range tc.expectedInOutput {
+				require.Contains(t, resultText, expected, "Expected output to contain: %s\nFull output: %s", expected, resultText)
+			}
+
+			// unwanted strings are not present
+			for _, notExpected := range tc.notInOutput {
+				require.NotContains(t, resultText, notExpected, "Expected output to NOT contain: %s\nFull output: %s", notExpected, resultText)
+			}
 		})
 	}
 }
@@ -902,6 +1098,68 @@ exit 0
 	require.NoError(t, err)
 }
 
+// createMockAPIServer creates a mock HTTP server that simulates the Snyk REST API
+func createMockAPIServer(t *testing.T, statusCode int, response map[string]interface{}) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		w.WriteHeader(statusCode)
+		if response != nil {
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// createMockSnykCliWithScript creates a mock Snyk CLI with custom script logic
+func createMockSnykCliWithScript(t *testing.T, path, scriptContent string) {
+	t.Helper()
+
+	var script string
+
+	if runtime.GOOS == "windows" {
+		// Convert bash script to batch script for Windows
+		script = `@echo off
+echo Error: snyk-code-0005: Snyk Code is not enabled
+exit /b 2
+`
+	} else {
+		script = scriptContent
+	}
+
+	err := os.WriteFile(path, []byte(script), 0755)
+	require.NoError(t, err)
+}
+
+// mockCliScriptErrorThenSuccess returns a bash script that errors on first call, succeeds on retry
+func mockCliScriptErrorThenSuccess() string {
+	return `#!/bin/bash
+# Use a unique temp file for this test run
+FLAG_FILE="/tmp/snyk_test_retry_$$"
+
+# First invocation returns error with exit code 2
+if [ ! -f "$FLAG_FILE" ]; then
+  touch "$FLAG_FILE"
+  echo "Error: snyk-code-0005: Snyk Code is not enabled for organization"
+  exit 2
+fi
+
+# Second invocation (retry) returns success
+rm -f "$FLAG_FILE"
+echo '{"runs":[{"tool":{"driver":{"rules":[]}},"results":[]}]}'
+exit 0
+`
+}
+
+// mockCliScriptAlwaysError returns a bash script that always errors
+func mockCliScriptAlwaysError(errorMsg string) string {
+	return fmt.Sprintf(`#!/bin/bash
+echo "%s"
+exit 2
+`, errorMsg)
+}
+
 // PathSafeTestName returns a file-system-safe version of the test name.
 // Replaces characters that could cause issues with file system paths.
 func PathSafeTestName(t *testing.T) string {
@@ -1365,7 +1623,7 @@ func TestHandleFileOutput(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		invocationCtx := mocks.NewMockInvocationContext(ctrl)
 		config := configuration.New()
-		config.Set(OutputDirParam, OsTempDir)
+		config.Set(shared.OutputDirParam, OsTempDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1389,7 +1647,7 @@ func TestHandleFileOutput(t *testing.T) {
 		config := configuration.New()
 
 		outputDir := t.TempDir()
-		config.Set(OutputDirParam, outputDir)
+		config.Set(shared.OutputDirParam, outputDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1413,7 +1671,7 @@ func TestHandleFileOutput(t *testing.T) {
 		config := configuration.New()
 
 		relativeDir := "output"
-		config.Set(OutputDirParam, relativeDir)
+		config.Set(shared.OutputDirParam, relativeDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1440,7 +1698,7 @@ func TestHandleFileOutput(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		invocationCtx := mocks.NewMockInvocationContext(ctrl)
 		config := configuration.New()
-		config.Set(OutputDirParam, OsTempDir)
+		config.Set(shared.OutputDirParam, OsTempDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		// Create a temp dir with a specific name
@@ -1470,7 +1728,7 @@ func TestHandleFileOutput(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				invocationCtx := mocks.NewMockInvocationContext(ctrl)
 				config := configuration.New()
-				config.Set(OutputDirParam, OsTempDir)
+				config.Set(shared.OutputDirParam, OsTempDir)
 				invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 				workingDir := t.TempDir()
@@ -1491,7 +1749,7 @@ func TestHandleFileOutput(t *testing.T) {
 
 		// Use an invalid path that will cause write to fail
 		invalidPath := "/invalid/readonly/path/that/does/not/exist"
-		config.Set(OutputDirParam, invalidPath)
+		config.Set(shared.OutputDirParam, invalidPath)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1509,7 +1767,7 @@ func TestHandleFileOutput(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				invocationCtx := mocks.NewMockInvocationContext(ctrl)
 				config := configuration.New()
-				config.Set(OutputDirParam, tempVariant)
+				config.Set(shared.OutputDirParam, tempVariant)
 				invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 				workingDir := t.TempDir()

@@ -45,6 +45,10 @@ const (
 	OsTempDir = "ostemp"
 )
 
+const (
+	CodeAutoEnablementError = "snyk-code-0005"
+)
+
 // Tool name constants to maintain backward compatibility
 const (
 	SnykScaTest      = "snyk_sca_scan"
@@ -225,30 +229,28 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 
 		// Run the command
 		output, err := m.runSnyk(ctx, invocationCtx, workingDir, args)
-		// we only return Err if we get exit code > 1 from CLI
+		success := (err == nil)
+
 		if err != nil {
-			if output != "" {
-				appUrl := invocationCtx.GetEngine().GetConfiguration().GetString(configuration.WEB_APP_URL)
-				if strings.Contains(strings.ToLower(output), "snyk-code-0005") && toolDef.Name == SnykCodeTest {
-					output += fmt.Sprintf("\nTo activate Snyk Code visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
-				}
-				return mcp.NewToolResultText(fmt.Sprintf("Error: %s", output)), nil
-			} else {
+			// No output from CLI, return Err
+			if output == "" {
 				return mcp.NewToolResultText(fmt.Sprintf("Error: %s", err.Error())), nil
 			}
-		}
 
-		output = m.enhanceOutput(&logger, toolDef, output, err == nil, workingDir, includeIgnores)
-
-		if invocationCtx.GetConfiguration().IsSet(shared.OutputDirParam) {
-			filePath, fileErr := handleFileOutput(logger, invocationCtx, workingDir, toolDef, output)
-			if fileErr != nil {
-				return nil, fileErr
+			// Try Snyk Code auto-enable for snyk-code-0005 error
+			if strings.Contains(strings.ToLower(output), CodeAutoEnablementError) && toolDef.Name == SnykCodeTest {
+				output, success = m.tryAutoEnableSnykCodeAndRetry(ctx, invocationCtx, &logger, workingDir, args, output, toolDef, includeIgnores)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Scan results written locally, Read them from: %s", filePath)), nil
+
+			// Return error if not recovered (either non-code-0005 error or failed auto-enable/retry)
+			if !success {
+				return mcp.NewToolResultText(fmt.Sprintf("Error: %s", output)), nil
+			}
 		}
 
-		return mcp.NewToolResultText(output), nil
+		// Success path: enhance output and handle file output
+		output = m.enhanceOutput(&logger, toolDef, output, success, workingDir, includeIgnores)
+		return m.handleSuccessOutput(invocationCtx, logger, workingDir, toolDef, output)
 	}
 }
 
@@ -275,6 +277,57 @@ func handleFileOutput(logger zerolog.Logger, invocationCtx workflow.InvocationCo
 // enhanceOutput enhances the scan output with structured issue data
 func (m *McpLLMBinding) enhanceOutput(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, success bool, workDir string, includeIgnores bool) string {
 	return mapScanResponse(logger, toolDef, output, success, workDir, includeIgnores)
+}
+
+// tryAutoEnableSnykCodeAndRetry attempts to enable Snyk Code for an organization and retry the scan
+func (m *McpLLMBinding) tryAutoEnableSnykCodeAndRetry(ctx context.Context, invocationCtx workflow.InvocationContext, logger *zerolog.Logger, workingDir string, args []string, output string, toolDef SnykMcpToolsDefinition, includeIgnores bool) (string, bool) {
+	config := invocationCtx.GetEngine().GetConfiguration()
+	orgId := config.GetString(configuration.ORGANIZATION)
+	appUrl := config.GetString(configuration.WEB_APP_URL)
+
+	// No organization ID - provide manual enablement instructions
+	if orgId == "" {
+		output += fmt.Sprintf("\nTo activate Snyk Code, visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
+		return output, false
+	}
+
+	// Try to enable Snyk Code for the organization
+	logger.Info().Str("orgId", orgId).Msg("Attempting to enable Snyk Code automatically")
+	output += "\n\nAttempting to enable Snyk Code automatically for organization: " + orgId
+
+	enableErr := m.enableSnykCodeForOrg(ctx, invocationCtx, orgId)
+	if enableErr != nil {
+		logger.Warn().Err(enableErr).Msg("Failed to enable Snyk Code automatically")
+		output += fmt.Sprintf("\n\nFailed to enable Snyk Code automatically: %s", enableErr.Error())
+		output += fmt.Sprintf("\nTo activate Snyk Code, visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
+		return output, false
+	}
+
+	// Retry the scan
+	logger.Info().Msg("Snyk Code enabled successfully, automatically retrying scan")
+	output += "\n\nSnyk Code has been successfully enabled for your organization. Retrying scan automatically...\n\n"
+
+	retryOutput, retryErr := m.runSnyk(ctx, invocationCtx, workingDir, args)
+	if retryErr != nil {
+		output += fmt.Sprintf("Retry failed: %s\n%s", retryErr.Error(), retryOutput)
+		return output, false
+	}
+
+	output += retryOutput
+	return output, true
+}
+
+// handleSuccessOutput handles file output or returns direct output
+func (m *McpLLMBinding) handleSuccessOutput(invocationCtx workflow.InvocationContext, logger zerolog.Logger, workingDir string, toolDef SnykMcpToolsDefinition, output string) (*mcp.CallToolResult, error) {
+	if invocationCtx.GetConfiguration().IsSet(shared.OutputDirParam) {
+		filePath, fileErr := handleFileOutput(logger, invocationCtx, workingDir, toolDef, output)
+		if fileErr != nil {
+			return nil, fileErr
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Scan results written locally, Read them from: %s", filePath)), nil
+	}
+
+	return mcp.NewToolResultText(output), nil
 }
 
 func (m *McpLLMBinding) snykAuthHandler(invocationCtx workflow.InvocationContext, toolDef SnykMcpToolsDefinition) server.ToolHandlerFunc {
