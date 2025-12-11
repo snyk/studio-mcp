@@ -59,12 +59,13 @@ func Init(engine workflow.Engine) error {
 	configureFlags.Bool(shared.ConfigureRulesParam, true, "configure Snyk rules for the tool (default true)")
 
 	mcpCfg := workflow.ConfigurationOptionsFromFlagset(mcpFlags)
-	entry, _ := engine.Register(WORKFLOWID_MCP, mcpCfg, mcpWorkflow)
+	mcpEntry, _ := engine.Register(WORKFLOWID_MCP, mcpCfg, mcpWorkflow)
 
 	configureCfg := workflow.ConfigurationOptionsFromFlagset(configureFlags)
-	entry, _ = engine.Register(WORKFLOWID_MCP_CONFIG, configureCfg, configureWorkflow)
+	mcpConfigEntry, _ := engine.Register(WORKFLOWID_MCP_CONFIG, configureCfg, configureWorkflow)
 
-	entry.SetVisibility(false)
+	mcpEntry.SetVisibility(false)
+	mcpConfigEntry.SetVisibility(false)
 
 	return nil
 }

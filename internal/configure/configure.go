@@ -157,11 +157,12 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 	// Configure rules (only if configureRules is true)
 	if configureRules {
 		var rulesContent string
-		if ruleType == shared.RuleTypeAlwaysApply {
+		switch ruleType {
+		case shared.RuleTypeAlwaysApply:
 			rulesContent = snykRulesAlwaysApply
-		} else if ruleType == shared.RuleTypeSmart {
+		case shared.RuleTypeSmart:
 			rulesContent = snykRulesSmartApply
-		} else {
+		default:
 			return fmt.Errorf("invalid rule type: %s. supported values are %s, %s", ruleType, shared.RuleTypeAlwaysApply, shared.RuleTypeSmart)
 		}
 
