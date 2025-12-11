@@ -44,8 +44,6 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 	configureMcp := config.GetBool(shared.ConfigureMcpParam)
 	configureRules := config.GetBool(shared.ConfigureRulesParam)
 
-	_ = userInterface.Output(fmt.Sprintf("\n🗑️  Removing Snyk MCP configuration from %s...\n", ideConf.name))
-
 	// Remove MCP server from config (only if configureMcp is true)
 	if configureMcp {
 		if ideConf.mcpGlobalConfigPath != "" {
