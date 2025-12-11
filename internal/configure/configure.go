@@ -18,11 +18,6 @@ var snykRulesAlwaysApply string
 var snykRulesSmartApply string
 
 // Configure sets up MCP server and rules for the specified IDE host.
-// Parameters:
-//   - invocationCtx: workflow invocation context
-//   - cliPath: path to the Snyk CLI executable
-//   - setGlobalRules: if true, writes rules globally; if false, writes to workspacePath
-//   - workspacePath: path to workspace for local rules (ignored if setGlobalRules is true)
 func Configure(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, cliPath string) error {
 	hostName := config.GetString(shared.ToolNameParam)
 	removeMode := config.GetBool(shared.RemoveParam)
