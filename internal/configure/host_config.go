@@ -41,9 +41,7 @@ func getHostConfig(hostName string) (*hostConfig, error) {
 			mcpGlobalConfigPath: filepath.Join(homeDir, ".gemini", "antigravity", "mcp_config.json"),
 			localRulesPath:      filepath.Join(".agent", "rules", "snyk_rules.md"),
 		}, nil
-	case "visual studio code":
-	case "visual studio code - insider":
-	case "vs_code":
+	case "visual studio code", "visual studio code - insiders", "vs_code":
 		return &hostConfig{
 			name:           hostName,
 			localRulesPath: filepath.Join(".github", "instructions", "snyk_rules.instructions.md"),

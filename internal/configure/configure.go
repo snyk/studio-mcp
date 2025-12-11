@@ -45,7 +45,7 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 // removeConfiguration removes the Snyk MCP server and rules from the specified tool
 func removeConfiguration(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, ideConf *hostConfig) error {
 	rulesScope := config.GetString(shared.RulesScopeParam)
-	workspacePath := config.GetString(shared.WorkspacePath)
+	workspacePath := config.GetString(shared.WorkspacePathParam)
 	configureMcp := config.GetBool(shared.ConfigureMcpParam)
 	configureRules := config.GetBool(shared.ConfigureRulesParam)
 
@@ -106,8 +106,8 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 func addConfiguration(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, cliPath string, ideConf *hostConfig) error {
 	ruleType := config.GetString(shared.RuleTypeParam)
 	rulesScope := config.GetString(shared.RulesScopeParam)
-	workspacePath := config.GetString(shared.WorkspacePath)
-	configCallback := config.Get(shared.McpConfigureCallback)
+	workspacePath := config.GetString(shared.WorkspacePathParam)
+	configCallback := config.Get(shared.McpRegisterCallbackParam)
 	configureMcp := config.GetBool(shared.ConfigureMcpParam)
 	configureRules := config.GetBool(shared.ConfigureRulesParam)
 
@@ -118,9 +118,9 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 		}
 	}
 
-	var configureMcpCallbackFunc shared.McpConfigCallBack
+	var configureMcpCallbackFunc shared.McpRegisterCallback
 	if configCallback != nil {
-		callbackFunc, ok := configCallback.(shared.McpConfigCallBack)
+		callbackFunc, ok := configCallback.(shared.McpRegisterCallback)
 		if !ok {
 			return fmt.Errorf("invalid config callback type: %T", configCallback)
 		}

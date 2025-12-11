@@ -6,13 +6,13 @@ const (
 	RuleTypeSmart       = "smart-apply"
 	RuleTypeAlwaysApply = "always-apply"
 
-	RulesScopeParam      = "rules-scope"
-	WorkspacePath        = "workspace"
-	ServerNameKey        = "Snyk"
-	McpConfigureCallback = "mcp-configure-callback"
-	RemoveParam          = "rm"
-	ConfigureMcpParam    = "configure-mcp"   // Flag to enable/disable MCP server configuration
-	ConfigureRulesParam  = "configure-rules" // Flag to enable/disable rules configuration
+	RulesScopeParam          = "rules-scope"
+	WorkspacePathParam       = "workspace"
+	ServerNameKey            = "Snyk"
+	McpRegisterCallbackParam = "mcp-register-callback" // Callback function to register MCP server. Used from Language Server to register MCP server using native IDE API.
+	RemoveParam              = "rm"
+	ConfigureMcpParam        = "configure-mcp"   // Flag to enable/disable MCP server configuration
+	ConfigureRulesParam      = "configure-rules" // Flag to enable/disable rules configuration
 
 	RulesGlobalScope    = "global"
 	RulesWorkspaceScope = "workspace"
@@ -24,6 +24,6 @@ const (
 	OutputDirParam      string = "output-dir"
 )
 
-type McpConfigCallBack func(cmd string, args []string, env map[string]string) error
+type McpRegisterCallback func(cmd string, args []string, env map[string]string) error
 
 type McpEnvMap map[string]string
