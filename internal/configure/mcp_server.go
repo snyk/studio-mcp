@@ -34,9 +34,12 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 		if err != nil {
 			return fmt.Errorf("failed to read config file: %w", err)
 		}
+		// empty string is invalid json, fall back to empty json
+		if len(data) == 0 || strings.TrimSpace(string(data)) == "" {
+			data = []byte("{}")
+		}
 		if err := json.Unmarshal(data, &config); err != nil {
-			logger.Warn().Msgf("Failed to parse existing config, will create new one: %v", err)
-			config = make(map[string]interface{})
+			return fmt.Errorf("failed to unmarshal config file: %w", err)
 		}
 	} else {
 		config = make(map[string]interface{})
