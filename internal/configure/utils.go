@@ -1,0 +1,42 @@
+package configure
+
+import (
+	"os"
+
+	"github.com/snyk/studio-mcp/shared"
+)
+
+// stringSlicesEqual compares two string slices for equality
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// envMapsEqual compares two environment maps for equality
+func envMapsEqual(a, b shared.McpEnvMap) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func isSymlink(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		// path does not exist or other error
+		return false, err
+	}
+	return info.Mode()&os.ModeSymlink != 0, nil
+}

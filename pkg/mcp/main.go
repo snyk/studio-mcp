@@ -27,28 +27,45 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/studio-mcp/internal/configure"
 	"github.com/snyk/studio-mcp/internal/mcp"
 	"github.com/snyk/studio-mcp/internal/trust"
+	"github.com/snyk/studio-mcp/shared"
 	"github.com/spf13/pflag"
 
 	"github.com/snyk/go-application-framework/pkg/workflow"
 )
 
 var WORKFLOWID_MCP = workflow.NewWorkflowIdentifier("mcp")
+var WORKFLOWID_MCP_CONFIG = workflow.NewWorkflowIdentifier("mcp.configure")
 
 func Init(engine workflow.Engine) error {
-	flags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
-	flags.StringP("transport", "t", "sse", "sets transport to <sse|stdio>")
+	mcpFlags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
+	mcpFlags.StringP(mcp.TransportParam, "t", "sse", "sets transport to <sse|stdio>")
 
-	flags.Bool(configuration.FLAG_EXPERIMENTAL, false, "enable experimental mcp command")
-	_ = flags.MarkDeprecated(configuration.FLAG_EXPERIMENTAL, "This is feature is in early access.")
+	mcpFlags.Bool(configuration.FLAG_EXPERIMENTAL, false, "enable experimental mcp command")
+	_ = mcpFlags.MarkDeprecated(configuration.FLAG_EXPERIMENTAL, "This is feature is in early access.")
 
-	flags.Bool(trust.DisableTrustFlag, false, "disable folder trust")
-	flags.StringP(mcp.OutputDirParam, "o", "", "specifies the output directory for scan responses")
+	mcpFlags.Bool(trust.DisableTrustFlag, false, "disable folder trust")
+	mcpFlags.StringP(shared.OutputDirParam, "o", "", "specifies the output directory for scan responses")
 
-	cfg := workflow.ConfigurationOptionsFromFlagset(flags)
-	entry, _ := engine.Register(WORKFLOWID_MCP, cfg, mcpWorkflow)
-	entry.SetVisibility(false)
+	configureFlags := pflag.NewFlagSet("configure", pflag.ContinueOnError)
+	configureFlags.StringP(shared.ToolNameParam, "t", "", "automatically configure snyk mcp server for a tool. supported tools: cursor, windsurf, antigravity, copilot, gemini-cli, claude-cli")
+	configureFlags.StringP(shared.RulesScopeParam, "", "global", "set configuration scope for rules. supported values: global, workspace")
+	configureFlags.String(shared.WorkspacePathParam, "", "workspace path for local rules (defaults to current directory)")
+	configureFlags.String(shared.RuleTypeParam, shared.RuleTypeAlwaysApply, "choose rule type to write <always-apply|smart-apply>. default always-apply")
+	configureFlags.Bool(shared.RemoveParam, false, "remove the Snyk MCP server from the specified tool configuration")
+	configureFlags.Bool(shared.ConfigureMcpParam, true, "configure MCP server in tool's config file (default true)")
+	configureFlags.Bool(shared.ConfigureRulesParam, true, "configure Snyk rules for the tool (default true)")
+
+	mcpCfg := workflow.ConfigurationOptionsFromFlagset(mcpFlags)
+	mcpEntry, _ := engine.Register(WORKFLOWID_MCP, mcpCfg, mcpWorkflow)
+
+	configureCfg := workflow.ConfigurationOptionsFromFlagset(configureFlags)
+	mcpConfigEntry, _ := engine.Register(WORKFLOWID_MCP_CONFIG, configureCfg, configureWorkflow)
+
+	mcpEntry.SetVisibility(false)
+	mcpConfigEntry.SetVisibility(false)
 
 	return nil
 }
@@ -105,6 +122,42 @@ func mcpWorkflow(
 	config.PersistInStorage(configuration.AUTHENTICATION_TOKEN)
 
 	mcpStart(invocation, cliPath)
+
+	return output, nil
+}
+
+func configureWorkflow(
+	invocation workflow.InvocationContext,
+	_ []workflow.Data,
+) (output []workflow.Data, err error) {
+	defer OnPanicRecover(invocation.GetEnhancedLogger())
+
+	config := invocation.GetConfiguration()
+	logger := invocation.GetEnhancedLogger()
+
+	config.Set(configuration.INTEGRATION_NAME, "MCP")
+
+	runtimeInfo := invocation.GetRuntimeInfo()
+	if runtimeInfo != nil {
+		config.Set(configuration.INTEGRATION_VERSION, runtimeInfo.GetVersion())
+	} else {
+		config.Set(configuration.INTEGRATION_VERSION, "unknown")
+	}
+
+	output = []workflow.Data{}
+
+	cliPath, err := getCliPath(invocation)
+	if err != nil {
+		logger.Err(err).Msg("Failed to set cli path")
+		return output, err
+	}
+	logger.Trace().Interface("environment", os.Environ()).Msg("start environment")
+
+	err = configure.Configure(invocation.GetEnhancedLogger(), invocation.GetConfiguration(), invocation.GetUserInterface(), cliPath)
+	if err != nil {
+		logger.Err(err).Msg("Failed to configure mcp server")
+		return nil, err
+	}
 
 	return output, nil
 }

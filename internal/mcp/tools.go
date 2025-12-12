@@ -38,6 +38,7 @@ import (
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
+	"github.com/snyk/studio-mcp/shared"
 )
 
 const (
@@ -254,7 +255,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 }
 
 func handleFileOutput(logger zerolog.Logger, invocationCtx workflow.InvocationContext, workingDir string, toolDef SnykMcpToolsDefinition, toolOutput string) (string, error) {
-	outputDir := invocationCtx.GetConfiguration().GetString(OutputDirParam)
+	outputDir := invocationCtx.GetConfiguration().GetString(shared.OutputDirParam)
 	baseDirName := filepath.Base(workingDir)
 	fileName := fmt.Sprintf("scan_output_%s_%s.json", baseDirName, toolDef.Name)
 	var path string
@@ -318,7 +319,7 @@ func (m *McpLLMBinding) tryAutoEnableSnykCodeAndRetry(ctx context.Context, invoc
 
 // handleSuccessOutput handles file output or returns direct output
 func (m *McpLLMBinding) handleSuccessOutput(invocationCtx workflow.InvocationContext, logger zerolog.Logger, workingDir string, toolDef SnykMcpToolsDefinition, output string) (*mcp.CallToolResult, error) {
-	if invocationCtx.GetConfiguration().IsSet(OutputDirParam) {
+	if invocationCtx.GetConfiguration().IsSet(shared.OutputDirParam) {
 		filePath, fileErr := handleFileOutput(logger, invocationCtx, workingDir, toolDef, output)
 		if fileErr != nil {
 			return nil, fileErr
@@ -468,4 +469,3 @@ func getAuthMsg(config configuration.Configuration, activeUser *authentication.A
 	org := config.GetString(configuration.ORGANIZATION)
 	return fmt.Sprintf("Already Authenticated. User: %s Using API Endpoint: %s and Org: %s", user, apiUrl, org)
 }
-
