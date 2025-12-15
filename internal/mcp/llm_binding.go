@@ -45,9 +45,9 @@ import (
 )
 
 const (
+	TransportParam     string = "transport"
 	SseTransportType   string = "sse"
 	StdioTransportType string = "stdio"
-	OutputDirParam     string = "output-dir"
 )
 
 // McpLLMBinding is an implementation of a mcp server that allows interaction between
@@ -104,7 +104,7 @@ func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) erro
 		return err
 	}
 
-	transportType := invocationContext.GetConfiguration().GetString("transport")
+	transportType := invocationContext.GetConfiguration().GetString(TransportParam)
 	switch transportType {
 	case StdioTransportType:
 		return m.HandleStdioServer()

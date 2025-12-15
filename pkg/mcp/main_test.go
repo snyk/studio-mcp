@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/studio-mcp/internal/mcp"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/snyk/go-application-framework/pkg/app"
@@ -17,7 +18,7 @@ func Test_ExtensionEntryPoint(t *testing.T) {
 	engineConfig := configuration.NewWithOpts(
 		configuration.WithAutomaticEnv(),
 	)
-	engineConfig.Set("transport", expectedTransportType)
+	engineConfig.Set(mcp.TransportParam, expectedTransportType)
 
 	//register extension under test
 	err := Init(engine)
@@ -33,6 +34,6 @@ func Test_ExtensionEntryPoint(t *testing.T) {
 	}()
 
 	assert.Eventuallyf(t, func() bool {
-		return expectedTransportType == engineConfig.GetString("transport")
+		return expectedTransportType == engineConfig.GetString(mcp.TransportParam)
 	}, time.Minute, time.Millisecond, "")
 }

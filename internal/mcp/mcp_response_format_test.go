@@ -33,13 +33,13 @@ import (
 // See: https://modelcontextprotocol.io/docs/concepts/resources
 func TestMCPResponseFormat(t *testing.T) {
 	testCases := []struct {
-		name                string
-		serverOptions       []server.ServerOption
-		setupServer         func(*server.MCPServer)
-		method              string
-		expectedArrayField  string
-		shouldBeEmpty       bool
-		expectedToolName    string
+		name               string
+		serverOptions      []server.ServerOption
+		setupServer        func(*server.MCPServer)
+		method             string
+		expectedArrayField string
+		shouldBeEmpty      bool
+		expectedToolName   string
 	}{
 		{
 			name: "empty resources list returns empty array not null",

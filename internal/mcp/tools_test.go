@@ -35,6 +35,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/trust"
+	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/require"
 
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -1622,7 +1623,7 @@ func TestHandleFileOutput(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		invocationCtx := mocks.NewMockInvocationContext(ctrl)
 		config := configuration.New()
-		config.Set(OutputDirParam, OsTempDir)
+		config.Set(shared.OutputDirParam, OsTempDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1646,7 +1647,7 @@ func TestHandleFileOutput(t *testing.T) {
 		config := configuration.New()
 
 		outputDir := t.TempDir()
-		config.Set(OutputDirParam, outputDir)
+		config.Set(shared.OutputDirParam, outputDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1670,7 +1671,7 @@ func TestHandleFileOutput(t *testing.T) {
 		config := configuration.New()
 
 		relativeDir := "output"
-		config.Set(OutputDirParam, relativeDir)
+		config.Set(shared.OutputDirParam, relativeDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1697,7 +1698,7 @@ func TestHandleFileOutput(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		invocationCtx := mocks.NewMockInvocationContext(ctrl)
 		config := configuration.New()
-		config.Set(OutputDirParam, OsTempDir)
+		config.Set(shared.OutputDirParam, OsTempDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		// Create a temp dir with a specific name
@@ -1727,7 +1728,7 @@ func TestHandleFileOutput(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				invocationCtx := mocks.NewMockInvocationContext(ctrl)
 				config := configuration.New()
-				config.Set(OutputDirParam, OsTempDir)
+				config.Set(shared.OutputDirParam, OsTempDir)
 				invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 				workingDir := t.TempDir()
@@ -1748,7 +1749,7 @@ func TestHandleFileOutput(t *testing.T) {
 
 		// Use an invalid path that will cause write to fail
 		invalidPath := "/invalid/readonly/path/that/does/not/exist"
-		config.Set(OutputDirParam, invalidPath)
+		config.Set(shared.OutputDirParam, invalidPath)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1766,7 +1767,7 @@ func TestHandleFileOutput(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				invocationCtx := mocks.NewMockInvocationContext(ctrl)
 				config := configuration.New()
-				config.Set(OutputDirParam, tempVariant)
+				config.Set(shared.OutputDirParam, tempVariant)
 				invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 				workingDir := t.TempDir()
