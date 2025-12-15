@@ -40,6 +40,7 @@ jobs:
           token: ${{ github.token }}
           branch: main
           noVersionBumpBehavior: patch
+          noNewCommitBehavior: warn
 
       - name: Create tag
         run: git tag ${{ steps.semver.outputs.next }}
