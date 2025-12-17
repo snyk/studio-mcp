@@ -3,10 +3,12 @@ package configure
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/snyk/go-application-framework/pkg/utils/git"
 )
 
 const (
@@ -37,6 +39,11 @@ func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logg
 
 	if err := os.WriteFile(rulesPath, []byte(rulesContent), 0644); err != nil {
 		return fmt.Errorf("failed to write local rules: %w", err)
+	}
+
+	err = gitIgnoreLocalRulesFile(workspacePath, rulesPath, logger)
+	if err != nil {
+		return err
 	}
 
 	logger.Debug().Msgf("Wrote local rules to %s", rulesPath)
@@ -167,6 +174,49 @@ func upsertDelimitedBlock(source, start, end, fullBlockToInsert string) string {
 		prefix = trimTrailingNewlines(src) + "\n\n"
 	}
 	return prefix + strings.TrimSpace(fullBlockToInsert) + "\n"
+}
+
+func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, logger *zerolog.Logger) error {
+	repo, _, err := git.RepoFromDir(workspacePath)
+	if err != nil {
+		logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
+		return nil
+	}
+
+	tree, err := repo.Worktree()
+	if err != nil {
+		logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
+		return err
+	}
+
+	status, err := tree.Status()
+	if err != nil {
+		logger.Err(err).Msgf("Unable to inspect git repo at %s: Skipping creating .gitignore entry.", workspacePath)
+		return err
+	}
+
+	_, isGitVisible := status[relativeRulesPath]
+
+	if isGitVisible {
+		gitIgnorePath := path.Join(workspacePath, ".gitignore")
+		file, err := os.OpenFile(gitIgnorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			logger.Err(err).Msgf("Unable to open .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
+			return err
+		}
+		defer func() {
+			err = file.Close()
+			logger.Err(err).Msgf("Unable to close .gitignore at %s", workspacePath)
+		}()
+
+		_, err = fmt.Fprintf(file, "\n\n%s\n", relativeRulesPath)
+		if err != nil {
+			logger.Err(err).Msgf("Unable to write .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func trimTrailingNewlines(s string) string {
