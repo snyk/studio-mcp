@@ -1,14 +1,15 @@
 package configure
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/rs/zerolog"
-	"github.com/snyk/go-application-framework/pkg/utils/git"
 )
 
 const (
@@ -41,12 +42,17 @@ func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logg
 		return fmt.Errorf("failed to write local rules: %w", err)
 	}
 
-	err = gitIgnoreLocalRulesFile(workspacePath, rulesPath, logger)
+	addedIgnore, err := gitIgnoreLocalRulesFile(workspacePath, relativeRulesPath, logger)
 	if err != nil {
 		return err
 	}
 
-	logger.Debug().Msgf("Wrote local rules to %s", rulesPath)
+	if addedIgnore {
+		logger.Debug().Msgf("Wrote local rules to %s and added git ignore", rulesPath)
+	} else {
+		logger.Debug().Msgf("Wrote local rules to %s", rulesPath)
+	}
+
 	return nil
 }
 
@@ -176,23 +182,31 @@ func upsertDelimitedBlock(source, start, end, fullBlockToInsert string) string {
 	return prefix + strings.TrimSpace(fullBlockToInsert) + "\n"
 }
 
-func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, logger *zerolog.Logger) error {
-	repo, _, err := git.RepoFromDir(workspacePath)
+// gitIgnoreLocalRulesFile adds .gitignore for a rules file if the file is visible to git
+func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, logger *zerolog.Logger) (bool, error) {
+	repo, err := git.PlainOpenWithOptions(workspacePath, &git.PlainOpenOptions{
+		DetectDotGit: true,
+	})
+
 	if err != nil {
-		logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
-		return nil
+		if errors.Is(err, git.ErrRepositoryNotExists) {
+			return false, nil
+		} else {
+			logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
+			return false, err
+		}
 	}
 
 	tree, err := repo.Worktree()
 	if err != nil {
 		logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
-		return err
+		return false, err
 	}
 
 	status, err := tree.Status()
 	if err != nil {
 		logger.Err(err).Msgf("Unable to inspect git repo at %s: Skipping creating .gitignore entry.", workspacePath)
-		return err
+		return false, err
 	}
 
 	_, isGitVisible := status[relativeRulesPath]
@@ -202,7 +216,7 @@ func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, log
 		file, err := os.OpenFile(gitIgnorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logger.Err(err).Msgf("Unable to open .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
-			return err
+			return false, err
 		}
 		defer func() {
 			err = file.Close()
@@ -212,11 +226,11 @@ func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, log
 		_, err = fmt.Fprintf(file, "\n\n%s\n", relativeRulesPath)
 		if err != nil {
 			logger.Err(err).Msgf("Unable to write .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
-			return err
+			return false, err
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 func trimTrailingNewlines(s string) string {

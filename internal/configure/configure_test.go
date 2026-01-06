@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/rs/zerolog"
 	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/assert"
@@ -339,31 +340,51 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 }
 
 func TestWriteLocalRules(t *testing.T) {
-	tempDir := t.TempDir()
+	tempGitRoot := t.TempDir()
+	_, err := git.PlainInit(tempGitRoot, false)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(tempGitRoot, ".gitignore"), []byte("Thumbs.db\n.DS_Store\n"), 0644)
+	require.NoError(t, err)
+
 	nopLogger := zerolog.New(io.Discard)
 	logger := &nopLogger
 	rulesContent := "# Test Rules\nRule 1\nRule 2"
 
 	t.Run("creates local rules file", func(t *testing.T) {
 		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		err := writeLocalRules(tempDir, relativeRulesPath, rulesContent, logger)
+
+		// Make sure 'relativeRulesPath' is not in the root .gitignore
+		gitIgnorePath := filepath.Join(tempGitRoot, ".gitignore")
+		assert.FileExists(t, gitIgnorePath)
+		gitIgnoreContent, err := os.ReadFile(gitIgnorePath)
+		require.NoError(t, err)
+		assert.NotContains(t, string(gitIgnoreContent), relativeRulesPath)
+
+		// Write local rules
+		err = writeLocalRules(tempGitRoot, relativeRulesPath, rulesContent, logger)
 		require.NoError(t, err)
 
-		fullPath := filepath.Join(tempDir, relativeRulesPath)
+		// Verify that local rules were written
+		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
 		assert.FileExists(t, fullPath)
-
 		content, err := os.ReadFile(fullPath)
 		require.NoError(t, err)
 		assert.Equal(t, rulesContent, string(content))
+
+		// Verify that local rules were added to root .gitignore
+		gitIgnoreContent, err = os.ReadFile(gitIgnorePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(gitIgnoreContent), relativeRulesPath)
 	})
 
 	t.Run("skips if content unchanged", func(t *testing.T) {
 		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		err := writeLocalRules(tempDir, relativeRulesPath, rulesContent, logger)
+		err := writeLocalRules(tempGitRoot, relativeRulesPath, rulesContent, logger)
 		require.NoError(t, err)
 
 		// Should not error - content already exists
-		fullPath := filepath.Join(tempDir, relativeRulesPath)
+		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
 		content, err := os.ReadFile(fullPath)
 		require.NoError(t, err)
 		assert.Equal(t, rulesContent, string(content))
