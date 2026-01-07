@@ -365,6 +365,9 @@ func TestWriteLocalRules(t *testing.T) {
 		err = writeLocalRules(tempGitRoot, relativeRulesPath, rulesContent, logger)
 		require.NoError(t, err)
 
+		err = gitIgnoreLocalRulesFile(tempGitRoot, relativeRulesPath, logger)
+		require.NoError(t, err)
+
 		// Verify that local rules were written
 		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
 		assert.FileExists(t, fullPath)
