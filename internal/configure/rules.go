@@ -1,10 +1,8 @@
 package configure
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -40,17 +38,6 @@ func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logg
 
 	if err := os.WriteFile(rulesPath, []byte(rulesContent), 0644); err != nil {
 		return fmt.Errorf("failed to write local rules: %w", err)
-	}
-
-	addedIgnore, err := gitIgnoreLocalRulesFile(workspacePath, relativeRulesPath, logger)
-	if err != nil {
-		return err
-	}
-
-	if addedIgnore {
-		logger.Debug().Msgf("Wrote local rules to %s and added git ignore", rulesPath)
-	} else {
-		logger.Debug().Msgf("Wrote local rules to %s", rulesPath)
 	}
 
 	return nil
@@ -183,54 +170,70 @@ func upsertDelimitedBlock(source, start, end, fullBlockToInsert string) string {
 }
 
 // gitIgnoreLocalRulesFile adds .gitignore for a rules file if the file is visible to git
-func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, logger *zerolog.Logger) (bool, error) {
+func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, logger *zerolog.Logger) error {
 	repo, err := git.PlainOpenWithOptions(workspacePath, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	})
 
 	if err != nil {
-		if errors.Is(err, git.ErrRepositoryNotExists) {
-			return false, nil
-		} else {
-			logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
-			return false, err
-		}
+		return err
 	}
 
-	tree, err := repo.Worktree()
+	worktree, err := repo.Worktree()
 	if err != nil {
-		logger.Err(err).Msgf("Unable to open git repo at %s: Skipping creating .gitignore entry.", workspacePath)
-		return false, err
+		return err
 	}
 
-	status, err := tree.Status()
+	status, err := worktree.Status()
 	if err != nil {
-		logger.Err(err).Msgf("Unable to inspect git repo at %s: Skipping creating .gitignore entry.", workspacePath)
-		return false, err
+		return err
 	}
 
 	_, isGitVisible := status[relativeRulesPath]
 
 	if isGitVisible {
-		gitIgnorePath := path.Join(workspacePath, ".gitignore")
+		gitIgnorePath, err := resolveGitignorePath(worktree.Filesystem.Root(), workspacePath, logger)
+		if err != nil {
+			logger.Err(err).Msgf("Unable to resolve .gitignore path at %s: Skipping creating .gitignore entry.", workspacePath)
+			return err
+		}
 		file, err := os.OpenFile(gitIgnorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logger.Err(err).Msgf("Unable to open .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
-			return false, err
+			return err
 		}
 		defer func() {
 			err = file.Close()
-			logger.Err(err).Msgf("Unable to close .gitignore at %s", workspacePath)
+			if err != nil {
+				logger.Err(err).Msgf("Unable to close .gitignore at %s", workspacePath)
+			}
 		}()
-
-		_, err = fmt.Fprintf(file, "\n\n%s\n", relativeRulesPath)
+		contentToAdd := fmt.Sprintf("\n# Snyk Security Extension - AI Rules (auto-generated)\n%s", strings.ReplaceAll(relativeRulesPath, "\\", "/"))
+		_, err = fmt.Fprintf(file, "%s\n", contentToAdd)
 		if err != nil {
 			logger.Err(err).Msgf("Unable to write .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
-			return false, err
+			return err
 		}
 	}
 
-	return true, nil
+	return nil
+}
+
+// resolveGitignorePath determines which .gitignore to use.
+// It first checks if a .gitignore exists in the workspace directory, otherwise falls back to git root.
+func resolveGitignorePath(gitRoot string, workspacePath string, logger *zerolog.Logger) (string, error) {
+	workspaceGitignore := filepath.Join(workspacePath, ".gitignore")
+	if _, err := os.Stat(workspaceGitignore); err == nil {
+		logger.Debug().Msgf("Using workspace .gitignore at %s", workspaceGitignore)
+		return workspaceGitignore, nil
+	}
+
+	gitignorePath := filepath.Join(gitRoot, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		logger.Debug().Msgf("Using git root .gitignore at %s", gitignorePath)
+		return gitignorePath, nil
+	}
+	return "", fmt.Errorf("no .gitignore found in workspace or git root")
 }
 
 func trimTrailingNewlines(s string) string {

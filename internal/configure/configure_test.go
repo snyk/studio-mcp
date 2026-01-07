@@ -845,6 +845,81 @@ func TestRemoveGlobalRules(t *testing.T) {
 	})
 }
 
+func TestGitIgnoreLocalRulesFile(t *testing.T) {
+	nopLogger := zerolog.Nop()
+	logger := &nopLogger
+
+	t.Run("adds gitignore entry for file detected by git", func(t *testing.T) {
+		tempGitRoot := t.TempDir()
+		_, err := git.PlainInit(tempGitRoot, false)
+		require.NoError(t, err)
+
+		// Create .gitignore file
+		gitIgnorePath := filepath.Join(tempGitRoot, ".gitignore")
+		err = os.WriteFile(gitIgnorePath, []byte("# Initial gitignore\n"), 0644)
+		require.NoError(t, err)
+
+		// Create a rules file using OS-native path separator (filepath.Join)
+		// On Windows this will use backslashes, on Linux forward slashes
+		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
+		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
+		err = os.MkdirAll(filepath.Dir(fullPath), 0755)
+		require.NoError(t, err)
+		err = os.WriteFile(fullPath, []byte("# Test Rules"), 0644)
+		require.NoError(t, err)
+
+		// Call gitIgnoreLocalRulesFile
+		err = gitIgnoreLocalRulesFile(tempGitRoot, relativeRulesPath, logger)
+		require.NoError(t, err)
+
+		// Verify gitignore was updated with forward slashes (normalized for gitignore compatibility)
+		gitIgnoreContent, err := os.ReadFile(gitIgnorePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(gitIgnoreContent), ".cursor/rules/snyk_rules.mdc")
+		assert.Contains(t, string(gitIgnoreContent), "# Snyk Security Extension - AI Rules (auto-generated)")
+		// Gitignore should never contain backslashes
+		assert.NotContains(t, string(gitIgnoreContent), "\\")
+	})
+
+	t.Run("does not add gitignore entry if file is already ignored", func(t *testing.T) {
+		tempGitRoot := t.TempDir()
+		_, err := git.PlainInit(tempGitRoot, false)
+		require.NoError(t, err)
+
+		// Create .gitignore file that already ignores the rules file (use forward slashes for gitignore)
+		gitIgnorePath := filepath.Join(tempGitRoot, ".gitignore")
+		err = os.WriteFile(gitIgnorePath, []byte("# Initial gitignore\n.cursor/rules/snyk_rules.mdc\n"), 0644)
+		require.NoError(t, err)
+
+		// Create a rules file using OS-native path separator
+		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
+		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
+		err = os.MkdirAll(filepath.Dir(fullPath), 0755)
+		require.NoError(t, err)
+		err = os.WriteFile(fullPath, []byte("# Test Rules"), 0644)
+		require.NoError(t, err)
+
+		// Call gitIgnoreLocalRulesFile
+		err = gitIgnoreLocalRulesFile(tempGitRoot, relativeRulesPath, logger)
+		require.NoError(t, err)
+
+		// Verify gitignore was NOT updated (file was already ignored, so not visible to git)
+		gitIgnoreContent, err := os.ReadFile(gitIgnorePath)
+		require.NoError(t, err)
+		// Should not contain the auto-generated comment since file was already ignored
+		assert.NotContains(t, string(gitIgnoreContent), "# Snyk Security Extension - AI Rules (auto-generated)")
+	})
+
+	t.Run("returns error for non-git directory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		// Don't initialize git
+
+		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
+		err := gitIgnoreLocalRulesFile(tempDir, relativeRulesPath, logger)
+		assert.Error(t, err)
+	})
+}
+
 func TestRemoveDelimitedBlock(t *testing.T) {
 	tests := []struct {
 		name     string
