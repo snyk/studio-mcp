@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/rs/zerolog"
 )
 
@@ -39,7 +40,6 @@ func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logg
 		return fmt.Errorf("failed to write local rules: %w", err)
 	}
 
-	logger.Debug().Msgf("Wrote local rules to %s", rulesPath)
 	return nil
 }
 
@@ -167,6 +167,73 @@ func upsertDelimitedBlock(source, start, end, fullBlockToInsert string) string {
 		prefix = trimTrailingNewlines(src) + "\n\n"
 	}
 	return prefix + strings.TrimSpace(fullBlockToInsert) + "\n"
+}
+
+// gitIgnoreLocalRulesFile adds .gitignore for a rules file if the file is visible to git
+func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, logger *zerolog.Logger) error {
+	repo, err := git.PlainOpenWithOptions(workspacePath, &git.PlainOpenOptions{
+		DetectDotGit: true,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return err
+	}
+
+	status, err := worktree.Status()
+	if err != nil {
+		return err
+	}
+
+	_, isGitVisible := status[relativeRulesPath]
+
+	if isGitVisible {
+		gitIgnorePath, err := resolveGitignorePath(worktree.Filesystem.Root(), workspacePath, logger)
+		if err != nil {
+			logger.Err(err).Msgf("Unable to resolve .gitignore path at %s: Skipping creating .gitignore entry.", workspacePath)
+			return err
+		}
+		file, err := os.OpenFile(gitIgnorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			logger.Err(err).Msgf("Unable to open .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
+			return err
+		}
+		defer func() {
+			err = file.Close()
+			if err != nil {
+				logger.Err(err).Msgf("Unable to close .gitignore at %s", workspacePath)
+			}
+		}()
+		contentToAdd := fmt.Sprintf("\n# Snyk Security Extension - AI Rules (auto-generated)\n%s", strings.ReplaceAll(relativeRulesPath, "\\", "/"))
+		_, err = fmt.Fprintf(file, "%s\n", contentToAdd)
+		if err != nil {
+			logger.Err(err).Msgf("Unable to write .gitignore at %s: Skipping creating .gitignore entry.", workspacePath)
+			return err
+		}
+	}
+
+	return nil
+}
+
+// resolveGitignorePath determines which .gitignore to use.
+// It first checks if a .gitignore exists in the workspace directory, otherwise falls back to git root.
+func resolveGitignorePath(gitRoot string, workspacePath string, logger *zerolog.Logger) (string, error) {
+	workspaceGitignore := filepath.Join(workspacePath, ".gitignore")
+	if _, err := os.Stat(workspaceGitignore); err == nil {
+		logger.Debug().Msgf("Using workspace .gitignore at %s", workspaceGitignore)
+		return workspaceGitignore, nil
+	}
+
+	gitignorePath := filepath.Join(gitRoot, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		logger.Debug().Msgf("Using git root .gitignore at %s", gitignorePath)
+		return gitignorePath, nil
+	}
+	return "", fmt.Errorf("no .gitignore found in workspace or git root")
 }
 
 func trimTrailingNewlines(s string) string {

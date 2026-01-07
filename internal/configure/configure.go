@@ -81,7 +81,6 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 			if err != nil {
 				return fmt.Errorf("failed to remove local rules for %s: %w", ideConf.name, err)
 			}
-			// TODO: delete from .gitignore
 
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed local rules for %s", ideConf.name))
 			logger.Info().Msgf("Successfully removed local rules for %s", ideConf.name)
@@ -174,10 +173,14 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 		if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing local rules (%s) to workspace: %s", ruleType, workspacePath))
 
-			// TODO: implement .gitignore here
 			err := writeLocalRules(workspacePath, ideConf.localRulesPath, rulesContent, logger)
 			if err != nil {
 				return fmt.Errorf("failed to write local rules for %s: %w", ideConf.name, err)
+			}
+
+			err = gitIgnoreLocalRulesFile(workspacePath, ideConf.localRulesPath, logger)
+			if err != nil {
+				logger.Err(err).Msgf("Unable to add git ignore for local rules at %s", workspacePath)
 			}
 
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote local rules for %s", ideConf.name))
