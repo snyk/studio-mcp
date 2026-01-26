@@ -22,11 +22,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
@@ -35,6 +38,7 @@ import (
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
 	"github.com/snyk/go-application-framework/pkg/workflow"
 	"github.com/snyk/studio-mcp/internal/analytics"
+	packageapi "github.com/snyk/studio-mcp/internal/apiclients/package/2024-10-15"
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
@@ -58,6 +62,7 @@ const (
 	SnykLogout       = "snyk_logout"
 	SnykTrust        = "snyk_trust"
 	SnykSendFeedback = "snyk_send_feedback"
+	SnykPackageInfo  = "snyk_package_info"
 )
 
 type SnykMcpToolsDefinition struct {
@@ -123,6 +128,8 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext) e
 			m.mcpServer.AddTool(tool, m.snykSendFeedback(invocationCtx, toolDef))
 		case SnykAuth:
 			m.mcpServer.AddTool(tool, m.snykAuthHandler(invocationCtx, toolDef))
+		case SnykPackageInfo:
+			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
 		}
@@ -468,4 +475,240 @@ func getAuthMsg(config configuration.Configuration, activeUser *authentication.A
 	apiUrl := config.GetString(configuration.API_URL)
 	org := config.GetString(configuration.ORGANIZATION)
 	return fmt.Sprintf("Already Authenticated. User: %s Using API Endpoint: %s and Org: %s", user, apiUrl, org)
+}
+
+// validEcosystems defines the allowed ecosystem values for the package info tool
+var validEcosystems = map[string]bool{
+	"npm":    true,
+	"golang": true,
+	"pypi":   true,
+	"maven":  true,
+	"nuget":  true,
+}
+
+// unhealthyRatings defines ratings that indicate a package should not be used
+var unhealthyRatings = map[string]bool{
+	"critical": true,
+	"low":      true,
+	"poor":     true,
+}
+
+// PackageInfoResponse represents the response structure for package info
+type PackageInfoResponse struct {
+	PackageName    string                    `json:"package_name"`
+	PackageVersion string                    `json:"package_version,omitempty"`
+	Ecosystem      string                    `json:"ecosystem"`
+	Language       string                    `json:"language"`
+	Description    string                    `json:"description,omitempty"`
+	LatestVersion  string                    `json:"latest_version,omitempty"`
+	Health         *packageapi.PackageHealth `json:"health,omitempty"`
+	Recommendation string                    `json:"recommendation"`
+	IsHealthy      bool                      `json:"is_healthy"`
+}
+
+func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.InvocationContext, toolDef SnykMcpToolsDefinition) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger := m.logger.With().Str("method", "snykPackageInfoHandler").Logger()
+		logger.Debug().Str("toolName", toolDef.Name).Msg("Received call for tool")
+
+		// Check authentication
+		user, whoAmiErr := authentication.CallWhoAmI(&logger, invocationCtx.GetEngine())
+		if whoAmiErr != nil || user == nil {
+			return mcp.NewToolResultText("User not authenticated. Please run 'snyk_auth' first"), nil
+		}
+
+		// Extract and validate arguments
+		args := request.GetArguments()
+
+		packageName, err := getRequiredStringArg(args, "package_name")
+		if err != nil {
+			return nil, err
+		}
+
+		ecosystem, err := getRequiredStringArg(args, "ecosystem")
+		if err != nil {
+			return nil, err
+		}
+
+		// Validate ecosystem
+		ecosystem = strings.ToLower(ecosystem)
+		if !validEcosystems[ecosystem] {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid ecosystem '%s'. Must be one of: npm, pypi, maven, nuget, golang", ecosystem)), nil
+		}
+
+		// Optional package version
+		packageVersion := getOptionalStringArg(args, "package_version")
+
+		// Get org ID from configuration
+		config := invocationCtx.GetEngine().GetConfiguration()
+		orgIdStr := config.GetString(configuration.ORGANIZATION)
+		if orgIdStr == "" {
+			return mcp.NewToolResultText("Error: Organization ID not configured. Please set an organization using 'snyk config set org=<org-id>'"), nil
+		}
+
+		orgId, err := uuid.Parse(orgIdStr)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
+		}
+
+		// Get API URL and HTTP client
+		apiUrl := config.GetString(configuration.API_URL)
+		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
+		endpoint, err := url.JoinPath(apiUrl, "rest")
+		if err != nil {
+			return nil, err
+		}
+		// Create the package API client
+		client, err := packageapi.NewClientWithResponses(endpoint, packageapi.WithHTTPClient(httpClient))
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to create package API client")
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to create API client: %s", err.Error())), nil
+		}
+
+		logger.Debug().Str("package", packageName).Str("version", packageVersion).Str("ecosystem", ecosystem).Msg("Fetching package info")
+
+		var response *PackageInfoResponse
+		if packageVersion != "" {
+			resp, err := client.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: "2024-10-15"})
+			if err != nil {
+				logger.Error().Err(err).Msg("Failed to fetch package version info")
+				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
+			}
+			if resp.StatusCode() != http.StatusOK {
+				return mcp.NewToolResultText(fmt.Sprintf("Error: Package not found or API error (status %d)", resp.StatusCode())), nil
+			}
+			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
+				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
+			}
+			response = buildPackageInfoResponse(resp.ApplicationvndApiJSON200.Data.Attributes)
+		} else {
+			resp, err := client.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: "2024-10-15"})
+			if err != nil {
+				logger.Error().Err(err).Msg("Failed to fetch package info")
+				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
+			}
+			if resp.StatusCode() != http.StatusOK {
+				return mcp.NewToolResultText(fmt.Sprintf("Error: Package not found or API error (status %d)", resp.StatusCode())), nil
+			}
+			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
+				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
+			}
+			response = buildPackageInfoResponseFromPackage(resp.ApplicationvndApiJSON200.Data.Attributes)
+		}
+
+		jsonBytes, err := json.Marshal(response)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to serialize response: %s", err.Error())), nil
+		}
+
+		return mcp.NewToolResultText(string(jsonBytes)), nil
+	}
+}
+
+func getRequiredStringArg(args map[string]interface{}, name string) (string, error) {
+	arg := args[name]
+	if arg == nil {
+		return "", fmt.Errorf("argument '%s' is required", name)
+	}
+	val, ok := arg.(string)
+	if !ok || val == "" {
+		return "", fmt.Errorf("argument '%s' must be a non-empty string", name)
+	}
+	return val, nil
+}
+
+func getOptionalStringArg(args map[string]interface{}, name string) string {
+	if arg := args[name]; arg != nil {
+		if val, ok := arg.(string); ok {
+			return val
+		}
+	}
+	return ""
+}
+
+func evaluatePackageHealth(health *packageapi.PackageHealth) (bool, string) {
+	if health == nil {
+		return true, "Package health information not available. Proceed with caution."
+	}
+
+	var issues []string
+
+	// Check overall rating
+	if health.OverallRating != nil && unhealthyRatings[strings.ToLower(*health.OverallRating)] {
+		issues = append(issues, fmt.Sprintf("overall health rating is %s", *health.OverallRating))
+	}
+
+	// Check security
+	if health.Security != nil {
+		if health.Security.Rating != nil && unhealthyRatings[strings.ToLower(*health.Security.Rating)] {
+			issues = append(issues, fmt.Sprintf("security rating is %s", *health.Security.Rating))
+		}
+		if health.Security.DirectVulnerabilitiesTotal != nil && *health.Security.DirectVulnerabilitiesTotal > 0 {
+			counts := health.Security.DirectVulnerabilitiesCounts
+			if counts != nil && counts.Critical != nil && *counts.Critical > 0 {
+				issues = append(issues, fmt.Sprintf("%d critical vulnerabilities", *counts.Critical))
+			}
+			if counts != nil && counts.High != nil && *counts.High > 0 {
+				issues = append(issues, fmt.Sprintf("%d high severity vulnerabilities", *counts.High))
+			}
+		}
+	}
+
+	// Check maintenance
+	if health.Maintenance != nil {
+		if health.Maintenance.Rating != nil && unhealthyRatings[strings.ToLower(*health.Maintenance.Rating)] {
+			issues = append(issues, fmt.Sprintf("maintenance rating is %s", *health.Maintenance.Rating))
+		}
+		if health.Maintenance.IsArchived != nil && *health.Maintenance.IsArchived {
+			issues = append(issues, "package is archived")
+		}
+	}
+
+	if len(issues) > 0 {
+		return false, fmt.Sprintf("WARNING: Do not use this package. Issues found: %s. Consider using an alternative package.", strings.Join(issues, "; "))
+	}
+
+	return true, "Package appears healthy and safe to use."
+}
+
+func buildPackageInfoResponse(attrs *packageapi.PackageVersionAttributes) *PackageInfoResponse {
+	isHealthy, recommendation := evaluatePackageHealth(attrs.PackageHealth)
+
+	response := &PackageInfoResponse{
+		PackageName:    attrs.PackageName,
+		PackageVersion: attrs.PackageVersion,
+		Ecosystem:      attrs.Ecosystem,
+		Language:       attrs.Language,
+		Health:         attrs.PackageHealth,
+		IsHealthy:      isHealthy,
+		Recommendation: recommendation,
+	}
+
+	if attrs.Description != nil {
+		response.Description = *attrs.Description
+	}
+
+	return response
+}
+
+func buildPackageInfoResponseFromPackage(attrs *packageapi.PackageAttributes) *PackageInfoResponse {
+	isHealthy, recommendation := evaluatePackageHealth(attrs.PackageHealth)
+
+	response := &PackageInfoResponse{
+		PackageName:    attrs.PackageName,
+		Ecosystem:      attrs.Ecosystem,
+		Language:       attrs.Language,
+		Health:         attrs.PackageHealth,
+		IsHealthy:      isHealthy,
+		Recommendation: recommendation,
+	}
+
+	if attrs.Description != nil {
+		response.Description = *attrs.Description
+	}
+	if attrs.LatestVersion != nil {
+		response.LatestVersion = *attrs.LatestVersion
+	}
+
+	return response
 }

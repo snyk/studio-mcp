@@ -1,0 +1,5 @@
+package: v20241015
+generate:
+  models: true
+  client: true
+output: package_info.go
