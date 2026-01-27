@@ -40,7 +40,7 @@ import (
 	"github.com/snyk/studio-mcp/internal/analytics"
 	packageapi "github.com/snyk/studio-mcp/internal/apiclients/package/2024-10-15"
 	"github.com/snyk/studio-mcp/internal/authentication"
-	"github.com/snyk/studio-mcp/internal/package_api"
+	"github.com/snyk/studio-mcp/internal/package_health"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
 	"github.com/snyk/studio-mcp/shared"
@@ -504,7 +504,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 
 		// Validate ecosystem
 		ecosystem = strings.ToLower(ecosystem)
-		if !package_api.ValidEcosystems[ecosystem] {
+		if !package_health.ValidEcosystems[ecosystem] {
 			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid ecosystem '%s'. Must be one of: npm, pypi, maven, nuget, golang", ecosystem)), nil
 		}
 
@@ -537,7 +537,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 
 		logger.Debug().Str("package", packageName).Str("version", packageVersion).Str("ecosystem", ecosystem).Msg("Fetching package info")
 
-		var response *package_api.PackageInfoResponse
+		var response *package_health.PackageInfoResponse
 		if packageVersion != "" {
 			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: "2024-10-15"})
 			if err != nil {
@@ -550,7 +550,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
 			}
-			response = package_api.BuildPackageInfoResponse(resp.ApplicationvndApiJSON200.Data.Attributes)
+			response = package_health.BuildPackageInfoResponse(resp.ApplicationvndApiJSON200.Data.Attributes)
 		} else {
 			resp, err := apiClient.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: "2024-10-15"})
 			if err != nil {
@@ -563,7 +563,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
 			}
-			response = package_api.BuildPackageInfoResponseFromPackage(resp.ApplicationvndApiJSON200.Data.Attributes)
+			response = package_health.BuildPackageInfoResponseFromPackage(resp.ApplicationvndApiJSON200.Data.Attributes)
 		}
 
 		jsonBytes, err := json.Marshal(response)

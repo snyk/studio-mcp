@@ -1,9 +1,6 @@
-package package_api
+package package_health
 
 import (
-	"fmt"
-	"strings"
-
 	packageapi "github.com/snyk/studio-mcp/internal/apiclients/package/2024-10-15"
 )
 
@@ -28,50 +25,31 @@ type PackageInfoResponse struct {
 	Recommendation string                    `json:"recommendation"`
 }
 
-func buildPackageRecommendationMessage(health *packageapi.PackageHealth) string {
-	if health == nil || health.OverallRating == nil {
-		return "Package health information not available. Proceed with caution."
-	}
-
-	if strings.ToLower(*health.OverallRating) == "healthy" {
-		return fmt.Sprintf("Package appears healthy and safe to use.")
-	} else if strings.ToLower(*health.OverallRating) == "review recommended" {
-		return fmt.Sprintf("WARNING: Check the package and ask for approval before using it.")
-	} else if strings.ToLower(*health.OverallRating) == "not recommended" {
-		return fmt.Sprintf("WARNING: Do not use this package. Multiple issues were found")
-	} else {
-		return "Package health information not available. Proceed with caution."
-	}
-}
-
 func BuildPackageInfoResponse(attrs *packageapi.PackageVersionAttributes) *PackageInfoResponse {
-	recommendation := buildPackageRecommendationMessage(attrs.PackageHealth)
-
 	response := &PackageInfoResponse{
 		PackageName:    attrs.PackageName,
 		PackageVersion: attrs.PackageVersion,
 		Ecosystem:      attrs.Ecosystem,
 		Language:       attrs.Language,
 		Health:         attrs.PackageHealth,
-		Recommendation: recommendation,
 	}
 
 	if attrs.Description != nil {
-		response.Description = *attrs.Description
+		response.Recommendation = *attrs.Description
+	}
+	if attrs.PackageHealth != nil && attrs.PackageHealth.Description != nil {
+		response.Recommendation = *attrs.PackageHealth.Description
 	}
 
 	return response
 }
 
 func BuildPackageInfoResponseFromPackage(attrs *packageapi.PackageAttributes) *PackageInfoResponse {
-	recommendation := buildPackageRecommendationMessage(attrs.PackageHealth)
-
 	response := &PackageInfoResponse{
-		PackageName:    attrs.PackageName,
-		Ecosystem:      attrs.Ecosystem,
-		Language:       attrs.Language,
-		Health:         attrs.PackageHealth,
-		Recommendation: recommendation,
+		PackageName: attrs.PackageName,
+		Ecosystem:   attrs.Ecosystem,
+		Language:    attrs.Language,
+		Health:      attrs.PackageHealth,
 	}
 
 	if attrs.Description != nil {
@@ -79,6 +57,9 @@ func BuildPackageInfoResponseFromPackage(attrs *packageapi.PackageAttributes) *P
 	}
 	if attrs.LatestVersion != nil {
 		response.LatestVersion = *attrs.LatestVersion
+	}
+	if attrs.PackageHealth != nil && attrs.PackageHealth.Description != nil {
+		response.Recommendation = *attrs.PackageHealth.Description
 	}
 
 	return response
