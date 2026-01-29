@@ -186,12 +186,11 @@ func TestIsToolInProfile(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "tool with lite and experimental profiles is included in full",
+			name:     "tool with lite and experimental profiles are not included in full",
 			profiles: []string{"lite", "experimental"},
 			profile:  ProfileFull,
-			expected: true,
+			expected: false,
 		},
-
 		// Experimental profile tests
 		{
 			name:     "tool with lite profile is included in experimental",
@@ -211,7 +210,6 @@ func TestIsToolInProfile(t *testing.T) {
 			profile:  ProfileExperimental,
 			expected: true,
 		},
-
 		// Case insensitivity tests
 		{
 			name:     "profile matching is case insensitive",

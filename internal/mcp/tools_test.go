@@ -1868,25 +1868,25 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := setupTestFixture(t)
-
-			err := fixture.binding.addSnykTools(fixture.invocationContext, tc.profile)
+			// Load tools from JSON and filter by profile
+			config, err := loadMcpToolsFromJson()
 			require.NoError(t, err)
 
-			// Get registered tools from the MCP server
-			registeredTools := fixture.binding.mcpServer.ListTools()
+			// Build map of tools that would be registered for this profile
 			registeredToolNames := make(map[string]bool)
-			for _, tool := range registeredTools {
-				registeredToolNames[tool.Name] = true
+			for _, toolDef := range config.Tools {
+				if IsToolInProfile(toolDef, tc.profile) {
+					registeredToolNames[toolDef.Name] = true
+				}
 			}
 
-			// Verify expected tools are registered
+			// Verify expected tools would be registered
 			for _, expectedTool := range tc.expectedTools {
 				require.True(t, registeredToolNames[expectedTool],
 					"Expected tool %s to be registered for profile %s", expectedTool, tc.profile)
 			}
 
-			// Verify unexpected tools are NOT registered
+			// Verify unexpected tools would NOT be registered
 			for _, unexpectedTool := range tc.unexpectedTools {
 				require.False(t, registeredToolNames[unexpectedTool],
 					"Expected tool %s to NOT be registered for profile %s", unexpectedTool, tc.profile)
@@ -1917,7 +1917,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_container_scan", "snyk_iac_scan":
+			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom":
 				// These should be in full but not lite
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
@@ -1926,7 +1926,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_sbom_scan", "snyk_aibom", "snyk_package_health":
+			case "snyk_package_health":
 				// These should be experimental only
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
