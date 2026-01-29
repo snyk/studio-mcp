@@ -538,6 +538,8 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		logger.Debug().Str("package", packageName).Str("version", packageVersion).Str("ecosystem", ecosystem).Msg("Fetching package info")
 
 		const packageApiVersion = "2024-10-15"
+		const insufficientPackageInfoMsg = "Warning: Snyk doesn't have sufficient information about this package. Proceed with caution and ask the user for input."
+
 		var response *package_health.PackageInfoResponse
 		if packageVersion != "" {
 			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: packageApiVersion})
@@ -546,7 +548,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
 			}
 			if resp.StatusCode() != http.StatusOK {
-				return mcp.NewToolResultText(fmt.Sprintf("Error: Package not found or API error (status %d)", resp.StatusCode())), nil
+				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
 			}
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
@@ -559,7 +561,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
 			}
 			if resp.StatusCode() != http.StatusOK {
-				return mcp.NewToolResultText(fmt.Sprintf("Error: Package not found or API error (status %d)", resp.StatusCode())), nil
+				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
 			}
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
