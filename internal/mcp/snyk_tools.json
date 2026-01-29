@@ -619,6 +619,33 @@
           "description": "Absolute path to the project root or subdirectory. Example: '/a/my-project' (Linux/macOS) or 'C:\\a\\my-project' (Windows)."
         }
       ]
+    },
+    {
+      "name": "snyk_package_health",
+      "description": "Retrieves package information and health metrics from Snyk's package intelligence API. Returns details about a package including security vulnerabilities, maintenance status, popularity metrics, and community health indicators.\nWhen to use: When evaluating a package before adding it as a dependency, when changing a package version, or when assessing the health and security of existing dependencies.",
+      "command": [],
+      "standardParams": [],
+      "ignoreTrust": true,
+      "params": [
+        {
+          "name": "package_name",
+          "type": "string",
+          "isRequired": true,
+          "description": "The name of the package to look up. For scoped npm packages, include the scope (e.g., '@angular/core'). For Maven packages, use 'groupId:artifactId' format."
+        },
+        {
+          "name": "package_version",
+          "type": "string",
+          "isRequired": false,
+          "description": "The specific version of the package to look up. If not provided, returns information about the package in general (latest version info)."
+        },
+        {
+          "name": "ecosystem",
+          "type": "string",
+          "isRequired": true,
+          "description": "The package ecosystem. Must be one of: npm, golang, pypi, maven, nuget."
+        }
+      ]
     }
   ]
 }

@@ -22,11 +22,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
@@ -35,7 +38,9 @@ import (
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
 	"github.com/snyk/go-application-framework/pkg/workflow"
 	"github.com/snyk/studio-mcp/internal/analytics"
+	packageapi "github.com/snyk/studio-mcp/internal/apiclients/package/2024-10-15"
 	"github.com/snyk/studio-mcp/internal/authentication"
+	"github.com/snyk/studio-mcp/internal/package_health"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
 	"github.com/snyk/studio-mcp/shared"
@@ -58,6 +63,7 @@ const (
 	SnykLogout       = "snyk_logout"
 	SnykTrust        = "snyk_trust"
 	SnykSendFeedback = "snyk_send_feedback"
+	SnykPackageInfo  = "snyk_package_info"
 )
 
 type SnykMcpToolsDefinition struct {
@@ -123,6 +129,8 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext) e
 			m.mcpServer.AddTool(tool, m.snykSendFeedback(invocationCtx, toolDef))
 		case SnykAuth:
 			m.mcpServer.AddTool(tool, m.snykAuthHandler(invocationCtx, toolDef))
+		case SnykPackageInfo:
+			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
 		}
@@ -468,4 +476,125 @@ func getAuthMsg(config configuration.Configuration, activeUser *authentication.A
 	apiUrl := config.GetString(configuration.API_URL)
 	org := config.GetString(configuration.ORGANIZATION)
 	return fmt.Sprintf("Already Authenticated. User: %s Using API Endpoint: %s and Org: %s", user, apiUrl, org)
+}
+
+func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.InvocationContext, toolDef SnykMcpToolsDefinition) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger := m.logger.With().Str("method", "snykPackageInfoHandler").Logger()
+		logger.Debug().Str("toolName", toolDef.Name).Msg("Received call for tool")
+
+		// Check authentication
+		user, whoAmiErr := authentication.CallWhoAmI(&logger, invocationCtx.GetEngine())
+		if whoAmiErr != nil || user == nil {
+			return mcp.NewToolResultText("User not authenticated. Please run 'snyk_auth' first"), nil
+		}
+
+		// Extract and validate arguments
+		args := request.GetArguments()
+
+		packageName, err := getRequiredStringArg(args, "package_name")
+		if err != nil {
+			return nil, err
+		}
+
+		ecosystem, err := getRequiredStringArg(args, "ecosystem")
+		if err != nil {
+			return nil, err
+		}
+
+		// Validate ecosystem
+		ecosystem = strings.ToLower(ecosystem)
+		if !package_health.ValidEcosystems[ecosystem] {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid ecosystem '%s'. Must be one of: npm, pypi, maven, nuget, golang", ecosystem)), nil
+		}
+
+		// Optional package version
+		packageVersion := getOptionalStringArg(args, "package_version")
+
+		// Get org ID from configuration
+		config := invocationCtx.GetEngine().GetConfiguration()
+		orgIdStr := config.GetString(configuration.ORGANIZATION)
+		if orgIdStr == "" {
+			return mcp.NewToolResultText("Error: Organization ID not configured. Please set an organization using 'snyk config set org=<org-id>'"), nil
+		}
+
+		orgId, err := uuid.Parse(orgIdStr)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
+		}
+
+		endpoint, err := url.JoinPath(config.GetString(configuration.API_URL), "rest")
+		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
+		if err != nil {
+			return nil, err
+		}
+		// Create the package API client
+		apiClient, err := packageapi.NewClientWithResponses(endpoint, packageapi.WithHTTPClient(httpClient))
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to create package API client")
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to create API client: %s", err.Error())), nil
+		}
+
+		logger.Debug().Str("package", packageName).Str("version", packageVersion).Str("ecosystem", ecosystem).Msg("Fetching package info")
+
+		const packageApiVersion = "2024-10-15"
+		const insufficientPackageInfoMsg = "Warning: Snyk doesn't have sufficient information about this package. Proceed with caution and ask the user for input."
+
+		var response *package_health.PackageInfoResponse
+		if packageVersion != "" {
+			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: packageApiVersion})
+			if err != nil {
+				logger.Error().Err(err).Msg("Failed to fetch package version info")
+				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
+			}
+			if resp.StatusCode() != http.StatusOK {
+				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
+			}
+			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
+				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
+			}
+			response = package_health.BuildPackageInfoResponse(resp.ApplicationvndApiJSON200.Data.Attributes)
+		} else {
+			resp, err := apiClient.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: packageApiVersion})
+			if err != nil {
+				logger.Error().Err(err).Msg("Failed to fetch package info")
+				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
+			}
+			if resp.StatusCode() != http.StatusOK {
+				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
+			}
+			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
+				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
+			}
+			response = package_health.BuildPackageInfoResponseFromPackage(resp.ApplicationvndApiJSON200.Data.Attributes)
+		}
+
+		jsonBytes, err := json.Marshal(response)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to serialize response: %s", err.Error())), nil
+		}
+
+		return mcp.NewToolResultText(string(jsonBytes)), nil
+	}
+}
+
+func getRequiredStringArg(args map[string]interface{}, name string) (string, error) {
+	arg := args[name]
+	if arg == nil {
+		return "", fmt.Errorf("argument '%s' is required", name)
+	}
+	val, ok := arg.(string)
+	if !ok || val == "" {
+		return "", fmt.Errorf("argument '%s' must be a non-empty string", name)
+	}
+	return val, nil
+}
+
+func getOptionalStringArg(args map[string]interface{}, name string) string {
+	if arg := args[name]; arg != nil {
+		if val, ok := arg.(string); ok {
+			return val
+		}
+	}
+	return ""
 }
