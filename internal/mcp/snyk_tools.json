@@ -621,7 +621,7 @@
       ]
     },
     {
-      "name": "snyk_package_info",
+      "name": "snyk_package_health",
       "description": "Retrieves package information and health metrics from Snyk's package intelligence API. Returns details about a package including security vulnerabilities, maintenance status, popularity metrics, and community health indicators.\nWhen to use: When evaluating a package before adding it as a dependency, when changing a package version, or when assessing the health and security of existing dependencies.",
       "command": [],
       "standardParams": [],
