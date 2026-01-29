@@ -9,6 +9,7 @@
       "ignoreTrust": true,
       "ignoreAuth": true,
       "standardParams": [],
+      "profiles": ["full","lite"],
       "params": []
     },
     {
@@ -21,6 +22,7 @@
         "all_projects",
         "json"
       ],
+      "profiles": ["full","lite"],
       "outputMapper": "ScaOutputMapper",
       "params": [
         {
@@ -249,6 +251,7 @@
       "ignoreTrust": true,
       "outputMapper": "CodeOutputMapper",
       "standardParams": ["sarif"],
+      "profiles": ["full","lite"],
       "params": [
         {
           "name": "path",
@@ -292,6 +295,7 @@
       ],
       "ignoreTrust": true,
       "standardParams": [],
+      "profiles": ["full"],
       "params": [
         {
           "name": "image",
@@ -389,6 +393,7 @@
       ],
       "ignoreTrust": true,
       "standardParams": [],
+      "profiles": ["full"],
       "params": [
         {
           "name": "path",
@@ -497,7 +502,7 @@
     },
     {
       "name": "snyk_sbom_scan",
-      "description": "Experimental command. Analyzes an existing SBOM file for known vulnerabilities in its open-source components. Requires components in SBOM to be identified using PackageURLs (purls). \nWhen to use: After SBOM generation (by Snyk or other tools) to assess components. In CI/CD to test generated/received SBOMs. For vulnerability scanning of third-party software when only an SBOM is available. \nHow to use: <snyk_sbom_scan> `file`=`/absolute/path/to/my_app.cdx.json`. \nInput Requirements: SBOMs in CycloneDX (JSON 1.4-1.6) or SPDX (JSON 2.3). Packages must have purls (types: apk, cargo, cocoapods, composer, deb, gem, generic, golang, hex, maven, npm, nuget, pub, pypi, rpm, swift). \nSecure SDLC Integration: Testing/Validation Phase: Scans inventoried components post-SBOM generation. Third-Party Risk Management: Assesses vulnerabilities from SBOMs of external software.",
+      "description": "Analyzes an existing SBOM file for known vulnerabilities in its open-source components. Requires components in SBOM to be identified using PackageURLs (purls). \nWhen to use: After SBOM generation (by Snyk or other tools) to assess components. In CI/CD to test generated/received SBOMs. For vulnerability scanning of third-party software when only an SBOM is available. \nHow to use: <snyk_sbom_scan> `file`=`/absolute/path/to/my_app.cdx.json`. \nInput Requirements: SBOMs in CycloneDX (JSON 1.4-1.6) or SPDX (JSON 2.3). Packages must have purls (types: apk, cargo, cocoapods, composer, deb, gem, generic, golang, hex, maven, npm, nuget, pub, pypi, rpm, swift). \nSecure SDLC Integration: Testing/Validation Phase: Scans inventoried components post-SBOM generation. Third-Party Risk Management: Assesses vulnerabilities from SBOMs of external software.",
       "command": [
         "sbom",
         "test"
@@ -505,6 +510,7 @@
       "standardParams": [
         "experimental"
       ],
+      "profiles": ["full"],
       "ignoreTrust": true,
       "params": [
         {
@@ -542,6 +548,7 @@
       "ignoreTrust": true,
       "ignoreAuth": true,
       "standardParams": [],
+      "profiles": ["full","lite"],
       "params": []
     },
     {
@@ -551,17 +558,19 @@
       "ignoreTrust": true,
       "ignoreAuth": true,
       "standardParams": [],
+      "profiles": ["full","lite"],
       "params": []
     },
     {
       "name": "snyk_aibom",
-      "description": "Generates an AI Bill of Materials (AIBOM) for Python software projects in CycloneDX v1.6 JSON format. This experimental feature analyzes local Python projects to identify AI models, datasets, tools, and other AI-related components. Requires an active internet connection and access to the experimental feature (available to customers on request). The command must be run from within a Python project directory and requires the CLI from the preview release channel. \nWhen to use: When you need to create an inventory of AI components in a Python project for compliance, security analysis, or documentation purposes.",
+      "description": "Generates an AI Bill of Materials (AIBOM) for Python software projects in CycloneDX v1.6 JSON format. This feature analyzes local Python projects to identify AI models, datasets, tools, and other AI-related components. Requires an active internet connection and access to the experimental feature (available to customers on request). The command must be run from within a Python project directory and requires the CLI from the preview release channel. \nWhen to use: When you need to create an inventory of AI components in a Python project for compliance, security analysis, or documentation purposes.",
       "command": [
         "aibom"
       ],
       "standardParams": [
         "experimental"
       ],
+      "profiles": ["full"],
       "params": [
         {
           "name": "path",
@@ -582,6 +591,7 @@
       "description": "Trust a given folder to allow Snyk to scan it. ONLY RUN THIS TOOL IF INSTRUCTED TO DO SO.",
       "command": [],
       "standardParams": [],
+      "profiles": ["full","lite"],
       "ignoreTrust": true,
       "params": [
         {
@@ -598,6 +608,7 @@
       "description": "Report ONLY the delta (this run only) of Snyk issues. Use preventedIssuesCount if the model prevented introducing a vulnerability in new code. Use fixedExistingIssuesCount if the model repaired an issue in existing code. Counts must NEVER be cumulative. Always send an absolute path.",
       "command": [],
       "standardParams": [],
+      "profiles": ["full","lite"],
       "ignoreTrust": true,
       "params": [
         {
@@ -625,6 +636,7 @@
       "description": "Retrieves package information and health metrics from Snyk's package intelligence API. Returns details about a package including security vulnerabilities, maintenance status, popularity metrics, and community health indicators.\nWhen to use: When evaluating a package before adding it as a dependency, when changing a package version, or when assessing the health and security of existing dependencies.",
       "command": [],
       "standardParams": [],
+      "profiles": ["experimental"],
       "ignoreTrust": true,
       "params": [
         {
