@@ -537,9 +537,10 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 
 		logger.Debug().Str("package", packageName).Str("version", packageVersion).Str("ecosystem", ecosystem).Msg("Fetching package info")
 
+		const packageApiVersion = "2024-10-15"
 		var response *package_health.PackageInfoResponse
 		if packageVersion != "" {
-			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: "2024-10-15"})
+			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: packageApiVersion})
 			if err != nil {
 				logger.Error().Err(err).Msg("Failed to fetch package version info")
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
@@ -552,7 +553,7 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 			}
 			response = package_health.BuildPackageInfoResponse(resp.ApplicationvndApiJSON200.Data.Attributes)
 		} else {
-			resp, err := apiClient.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: "2024-10-15"})
+			resp, err := apiClient.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: packageApiVersion})
 			if err != nil {
 				logger.Error().Err(err).Msg("Failed to fetch package info")
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil

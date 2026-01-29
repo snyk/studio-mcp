@@ -35,7 +35,7 @@ func BuildPackageInfoResponse(attrs *packageapi.PackageVersionAttributes) *Packa
 	}
 
 	if attrs.Description != nil {
-		response.Recommendation = *attrs.Description
+		response.Description = *attrs.Description
 	}
 	if attrs.PackageHealth != nil && attrs.PackageHealth.Description != nil {
 		response.Recommendation = *attrs.PackageHealth.Description
