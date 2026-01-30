@@ -79,36 +79,13 @@ func GetProfile(configValue string) (Profile, error) {
 }
 
 // IsToolInProfile determines if a tool should be included based on the active profile.
-// The logic is:
-//   - ProfileLite: only tools explicitly marked with "lite" in their profiles
-//   - ProfileExperimental: all tools (includes everything)
-//   - ProfileFull (default): all tools except those marked as experimental-only
 func IsToolInProfile(toolDef SnykMcpToolsDefinition, profile Profile) bool {
 	profiles := toolDef.Profiles
-
-	switch profile {
-	case ProfileLite:
-		// Only include tools explicitly marked as "lite"
-		return containsProfile(profiles, string(ProfileLite))
-	case ProfileExperimental:
-		// Experimental includes ALL tools
-		return true
-	case ProfileFull:
-		fallthrough
-	default:
-		// Full includes everything EXCEPT experimental-only tools
-		// A tool is experimental-only if it ONLY has "experimental" in its profiles
-		if containsProfile(profiles, string(ProfileExperimental)) {
-			return false // Experimental-only tool, not in full
-		}
-		return true // Has lite or other profiles, include in full
+	if profile == "" {
+		profile = DefaultProfile
 	}
-}
-
-// containsProfile checks if the slice contains the given profile string
-func containsProfile(slice []string, item string) bool {
-	for _, s := range slice {
-		if strings.EqualFold(s, item) {
+	for _, s := range profiles {
+		if strings.EqualFold(s, string(profile)) {
 			return true
 		}
 	}
