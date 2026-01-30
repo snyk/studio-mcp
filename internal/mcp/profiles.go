@@ -54,7 +54,16 @@ func ParseProfile(profileStr string) (Profile, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("invalid profile %q: must be one of: lite, full, experimental", profileStr)
+	return "", fmt.Errorf("invalid profile %q: must be one of: %s", profileStr, validProfilesString())
+}
+
+// validProfilesString returns a comma-separated string of valid profile names
+func validProfilesString() string {
+	names := make([]string, len(ValidProfiles))
+	for i, p := range ValidProfiles {
+		names[i] = string(p)
+	}
+	return strings.Join(names, ", ")
 }
 
 // GetProfile determines the active profile from config value and environment variable.
