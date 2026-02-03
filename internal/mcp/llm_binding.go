@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
@@ -48,14 +48,15 @@ const (
 	TransportParam     string = "transport"
 	SseTransportType   string = "sse"
 	StdioTransportType string = "stdio"
+	OutputDirParam     string = "output-dir"
 )
 
 // McpLLMBinding is an implementation of a mcp server that allows interaction between
 // a given SnykLLMBinding and a CommandService.
 type McpLLMBinding struct {
 	logger          *zerolog.Logger
-	mcpServer       *server.MCPServer
-	sseServer       *server.SSEServer
+	mcpServer       *mcp.Server
+	sseHandler      *mcp.SSEHandler
 	folderTrust     *trust.FolderTrust
 	baseURL         *url.URL
 	mutex           sync.RWMutex
@@ -86,12 +87,17 @@ func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) erro
 		version = runTimeInfo.GetVersion()
 	}
 
-	m.mcpServer = server.NewMCPServer(
-		"Snyk MCP Server",
-		version,
-		server.WithLogging(),
-		server.WithResourceCapabilities(true, true),
-		server.WithPromptCapabilities(true),
+	// Create server options
+	serverOpts := &mcp.ServerOptions{
+		Logger: logging.NewSlogLogger(),
+	}
+
+	m.mcpServer = mcp.NewServer(
+		&mcp.Implementation{
+			Name:    "Snyk MCP Server",
+			Version: version,
+		},
+		serverOpts,
 	)
 
 	m.logger = logging.ConfigureLogging(m.mcpServer)
@@ -111,7 +117,7 @@ func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) erro
 		return err
 	}
 
-	transportType := invocationContext.GetConfiguration().GetString(TransportParam)
+	transportType := invocationContext.GetConfiguration().GetString("transport")
 	switch transportType {
 	case StdioTransportType:
 		return m.HandleStdioServer()
@@ -127,7 +133,9 @@ func (m *McpLLMBinding) HandleStdioServer() error {
 	m.started = true
 	m.mutex.Unlock()
 	m.logger.Info().Msg("Starting MCP Stdio server")
-	err := server.ServeStdio(m.mcpServer)
+
+	// Use the official SDK's StdioTransport
+	err := m.mcpServer.Run(context.Background(), &mcp.StdioTransport{})
 
 	if err != nil {
 		m.logger.Error().Err(err).Msg("Error starting MCP Stdio server")
@@ -147,7 +155,10 @@ func (m *McpLLMBinding) HandleSseServer() error {
 		m.baseURL = defaultUrl
 	}
 
-	m.sseServer = server.NewSSEServer(m.mcpServer, server.WithBaseURL(m.baseURL.String()))
+	// Create SSE handler using the official SDK
+	m.sseHandler = mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
+		return m.mcpServer
+	}, nil)
 
 	endpoint := m.baseURL.String() + "/sse"
 
@@ -167,7 +178,7 @@ func (m *McpLLMBinding) HandleSseServer() error {
 
 	srv := &http.Server{
 		Addr:    m.baseURL.Host,
-		Handler: middleware(m.sseServer),
+		Handler: middleware(m.sseHandler),
 	}
 
 	err := srv.ListenAndServe()
@@ -189,10 +200,10 @@ var allowedHostnames = map[string]bool{
 	"":          true,
 }
 
-func middleware(sseServer *server.SSEServer) http.Handler {
+func middleware(sseHandler *mcp.SSEHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isValidHttpRequest(r) {
-			sseServer.ServeHTTP(w, r)
+			sseHandler.ServeHTTP(w, r)
 		} else {
 			http.Error(w, "Forbidden: Access restricted to localhost origins", http.StatusForbidden)
 		}
@@ -227,12 +238,9 @@ func (m *McpLLMBinding) Shutdown(ctx context.Context) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	if m.sseServer != nil {
-		err := m.sseServer.Shutdown(ctx)
-		if err != nil {
-			m.logger.Error().Err(err).Msg("Error shutting down MCP SSE server")
-		}
-	}
+	// The official SDK doesn't have a direct shutdown method for SSE
+	// The server will stop when connections are closed
+	m.started = false
 }
 
 func (m *McpLLMBinding) Started() bool {
@@ -240,6 +248,21 @@ func (m *McpLLMBinding) Started() bool {
 	defer m.mutex.RUnlock()
 
 	return m.started
+}
+
+// getClientInfo retrieves client info from the current session
+func (m *McpLLMBinding) getClientInfo(_ context.Context) ClientInfo {
+	// The official SDK manages sessions internally
+	// We iterate through sessions to find client info
+	var clientInfo ClientInfo
+	for ss := range m.mcpServer.Sessions() {
+		info := ClientInfoFromSession(ss)
+		if info.Name != "" {
+			clientInfo = info
+			break
+		}
+	}
+	return clientInfo
 }
 
 func (m *McpLLMBinding) updateGafConfigWithIntegrationEnvironment(invocationCtx workflow.InvocationContext, environmentName, environmentVersion string) {

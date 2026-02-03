@@ -30,12 +30,10 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/trust"
-	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/require"
 
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -96,7 +94,10 @@ func setupTestFixture(t *testing.T) *testFixture {
 	// Create the binding
 	binding := NewMcpLLMBinding(WithCliPath(snykCliPath), WithLogger(invocationCtx.GetEnhancedLogger()))
 	binding.folderTrust = trust.NewFolderTrust(&logger, invocationCtx.GetConfiguration())
-	binding.mcpServer = server.NewMCPServer("Snyk", "1.1.1")
+	binding.mcpServer = mcp.NewServer(
+		&mcp.Implementation{Name: "Snyk", Version: "1.1.1"},
+		nil,
+	)
 
 	tools, err := loadMcpToolsFromJson()
 	require.NoError(t, err)
@@ -204,12 +205,12 @@ func TestSnykTestHandler(t *testing.T) {
 			err = json.Unmarshal(requestJSON, &request)
 			require.NoError(t, err, "Failed to unmarshal JSON to CallToolRequest")
 
-			result, err := handler(t.Context(), request)
+			result, err := handler(t.Context(), &request)
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
-			textContent, ok := result.Content[0].(mcp.TextContent)
+			textContent, ok := result.Content[0].(*mcp.TextContent)
 			require.True(t, ok)
 			content := strings.TrimSpace(textContent.Text)
 
@@ -308,10 +309,10 @@ func TestSnykCodeTestHandler(t *testing.T) {
 			err = json.Unmarshal(requestJSON, &request)
 			require.NoError(t, err, "Failed to unmarshal JSON to CallToolRequest")
 
-			result, err := handler(t.Context(), request)
+			result, err := handler(t.Context(), &request)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			textContent, ok := result.Content[0].(mcp.TextContent)
+			textContent, ok := result.Content[0].(*mcp.TextContent)
 			require.True(t, ok)
 			content := strings.TrimSpace(textContent.Text)
 
@@ -491,11 +492,11 @@ func TestSnykCodeAutoEnablement(t *testing.T) {
 			err = json.Unmarshal(requestJSON, &request)
 			require.NoError(t, err)
 
-			result, err := handler(context.Background(), request)
+			result, err := handler(context.Background(), &request)
 
 			var resultText string
 			if result != nil && len(result.Content) > 0 {
-				textContent, ok := result.Content[0].(mcp.TextContent)
+				textContent, ok := result.Content[0].(*mcp.TextContent)
 				require.True(t, ok)
 				resultText = textContent.Text
 			}
@@ -530,14 +531,12 @@ func TestBasicSnykCommands(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		handlerFunc  func(invocationCtx workflow.InvocationContext, toolDefinition SnykMcpToolsDefinition) func(ctx context.Context, arguments mcp.CallToolRequest) (*mcp.CallToolResult, error)
 		mockResponse string
 		expectedCmd  string
 		command      []string
 	}{
 		{
 			name:         "Version Command",
-			handlerFunc:  fixture.binding.defaultHandler,
 			command:      []string{"--version"},
 			mockResponse: `{"client":{"version":"1.1192.0"}}`,
 			expectedCmd:  "version",
@@ -549,8 +548,8 @@ func TestBasicSnykCommands(t *testing.T) {
 			// Configure mock CLI
 			fixture.mockCliOutput(tc.mockResponse)
 
-			// Create the handler
-			handler := tc.handlerFunc(fixture.invocationContext, SnykMcpToolsDefinition{Command: tc.command})
+			// Create the handler using the defaultHandler method
+			handler := fixture.binding.defaultHandler(fixture.invocationContext, SnykMcpToolsDefinition{Command: tc.command})
 
 			// Create an empty request object as JSON string
 			requestObj := map[string]any{
@@ -567,12 +566,12 @@ func TestBasicSnykCommands(t *testing.T) {
 			require.NoError(t, err, "Failed to unmarshal JSON to CallToolRequest")
 
 			// Call the handler
-			result, err := handler(t.Context(), request)
+			result, err := handler(t.Context(), &request)
 
 			// Assertions
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			textContent, ok := result.Content[0].(mcp.TextContent)
+			textContent, ok := result.Content[0].(*mcp.TextContent)
 			require.True(t, ok)
 			require.Equal(t, tc.mockResponse, strings.TrimSpace(textContent.Text))
 		})
@@ -602,12 +601,12 @@ func TestAuthHandler(t *testing.T) {
 	err = json.Unmarshal(requestJSON, &request)
 	require.NoError(t, err, "Failed to unmarshal JSON to CallToolRequest")
 
-	result, err := handler(t.Context(), request)
+	result, err := handler(t.Context(), &request)
 
 	// Assertions
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	textContent, ok := result.Content[0].(mcp.TextContent)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
 	require.True(t, ok)
 	require.Equal(t, mockAuthResponse, strings.TrimSpace(textContent.Text))
 }
@@ -1065,7 +1064,9 @@ func TestRunSnyk(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture.mockCliOutput(tc.mockOutput)
 
-			output, err := fixture.binding.runSnyk(ctx, fixture.invocationContext, tc.workingDir, tc.command)
+			// Pass empty ClientInfo for tests
+			clientInfo := ClientInfo{Name: "test-client", Version: "1.0.0"}
+			output, err := fixture.binding.runSnyk(ctx, fixture.invocationContext, tc.workingDir, tc.command, clientInfo)
 
 			if tc.expectError {
 				require.Error(t, err)
@@ -1582,13 +1583,16 @@ func TestSnykTrustHandler(t *testing.T) {
 	handler := fixture.binding.snykTrustHandler(fixture.invocationContext, *toolDef)
 
 	t.Run("PathMissing", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Arguments: map[string]interface{}{},
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]interface{}{},
 			},
 		}
+		requestJSON, _ := json.Marshal(requestObj)
+		var request mcp.CallToolRequest
+		_ = json.Unmarshal(requestJSON, &request)
 
-		result, err := handler(t.Context(), request)
+		result, err := handler(t.Context(), &request)
 
 		require.Error(t, err)
 		require.Nil(t, result)
@@ -1596,13 +1600,16 @@ func TestSnykTrustHandler(t *testing.T) {
 	})
 
 	t.Run("PathEmpty", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Arguments: map[string]interface{}{"path": ""},
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]interface{}{"path": ""},
 			},
 		}
+		requestJSON, _ := json.Marshal(requestObj)
+		var request mcp.CallToolRequest
+		_ = json.Unmarshal(requestJSON, &request)
 
-		result, err := handler(t.Context(), request)
+		result, err := handler(t.Context(), &request)
 
 		require.Error(t, err)
 		require.Nil(t, result)
@@ -1623,7 +1630,7 @@ func TestHandleFileOutput(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		invocationCtx := mocks.NewMockInvocationContext(ctrl)
 		config := configuration.New()
-		config.Set(shared.OutputDirParam, OsTempDir)
+		config.Set(OutputDirParam, OsTempDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1647,7 +1654,7 @@ func TestHandleFileOutput(t *testing.T) {
 		config := configuration.New()
 
 		outputDir := t.TempDir()
-		config.Set(shared.OutputDirParam, outputDir)
+		config.Set(OutputDirParam, outputDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1671,7 +1678,7 @@ func TestHandleFileOutput(t *testing.T) {
 		config := configuration.New()
 
 		relativeDir := "output"
-		config.Set(shared.OutputDirParam, relativeDir)
+		config.Set(OutputDirParam, relativeDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1698,7 +1705,7 @@ func TestHandleFileOutput(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		invocationCtx := mocks.NewMockInvocationContext(ctrl)
 		config := configuration.New()
-		config.Set(shared.OutputDirParam, OsTempDir)
+		config.Set(OutputDirParam, OsTempDir)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		// Create a temp dir with a specific name
@@ -1728,7 +1735,7 @@ func TestHandleFileOutput(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				invocationCtx := mocks.NewMockInvocationContext(ctrl)
 				config := configuration.New()
-				config.Set(shared.OutputDirParam, OsTempDir)
+				config.Set(OutputDirParam, OsTempDir)
 				invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 				workingDir := t.TempDir()
@@ -1749,7 +1756,7 @@ func TestHandleFileOutput(t *testing.T) {
 
 		// Use an invalid path that will cause write to fail
 		invalidPath := "/invalid/readonly/path/that/does/not/exist"
-		config.Set(shared.OutputDirParam, invalidPath)
+		config.Set(OutputDirParam, invalidPath)
 		invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 		workingDir := t.TempDir()
@@ -1767,7 +1774,7 @@ func TestHandleFileOutput(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				invocationCtx := mocks.NewMockInvocationContext(ctrl)
 				config := configuration.New()
-				config.Set(shared.OutputDirParam, tempVariant)
+				config.Set(OutputDirParam, tempVariant)
 				invocationCtx.EXPECT().GetConfiguration().Return(config).AnyTimes()
 
 				workingDir := t.TempDir()

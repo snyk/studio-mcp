@@ -17,7 +17,6 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,8 +24,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	mcpServer "github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 )
 
@@ -85,32 +83,46 @@ func buildArg(key string, param convertedToolParameter) string {
 }
 
 // createToolFromDefinition creates an MCP tool from a Snyk tool definition
-func createToolFromDefinition(toolDef *SnykMcpToolsDefinition) mcp.Tool {
-	opts := []mcp.ToolOption{mcp.WithDescription(toolDef.Description)}
+// Returns a Tool pointer with InputSchema as required by the official go-sdk
+func createToolFromDefinition(toolDef *SnykMcpToolsDefinition) *mcp.Tool {
+	// Build JSON schema properties
+	properties := make(map[string]any)
+	required := []string{}
+
 	for _, param := range toolDef.Params {
+		propSchema := map[string]any{
+			"description": param.Description,
+		}
+
 		switch param.Type {
 		case "string":
-			if param.IsRequired {
-				opts = append(opts, mcp.WithString(param.Name, mcp.Required(), mcp.Description(param.Description)))
-			} else {
-				opts = append(opts, mcp.WithString(param.Name, mcp.Description(param.Description)))
-			}
+			propSchema["type"] = "string"
 		case "boolean":
-			if param.IsRequired {
-				opts = append(opts, mcp.WithBoolean(param.Name, mcp.Required(), mcp.Description(param.Description)))
-			} else {
-				opts = append(opts, mcp.WithBoolean(param.Name, mcp.Description(param.Description)))
-			}
+			propSchema["type"] = "boolean"
 		case "number":
-			if param.IsRequired {
-				opts = append(opts, mcp.WithNumber(param.Name, mcp.Required(), mcp.Description(param.Description)))
-			} else {
-				opts = append(opts, mcp.WithNumber(param.Name, mcp.Description(param.Description)))
-			}
+			propSchema["type"] = "number"
+		}
+
+		properties[param.Name] = propSchema
+
+		if param.IsRequired {
+			required = append(required, param.Name)
 		}
 	}
 
-	return mcp.NewTool(toolDef.Name, opts...)
+	inputSchema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		inputSchema["required"] = required
+	}
+
+	return &mcp.Tool{
+		Name:        toolDef.Name,
+		Description: toolDef.Description,
+		InputSchema: inputSchema,
+	}
 }
 
 func prepareCmdArgsForTool(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, requestArgs map[string]any) (map[string]convertedToolParameter, string, error) {
@@ -190,14 +202,25 @@ func convertToCliParam(cliParam string) string {
 	return strings.ReplaceAll(cliParam, "_", "-")
 }
 
-func ClientInfoFromContext(ctx context.Context) mcp.Implementation {
-	retrievedSession := mcpServer.ClientSessionFromContext(ctx)
-	sessionWithClientInfo, ok := retrievedSession.(mcpServer.SessionWithClientInfo)
-	var clientInfo mcp.Implementation
-	if ok {
-		clientInfo = sessionWithClientInfo.GetClientInfo()
+// ClientInfo holds client implementation info extracted from session
+type ClientInfo struct {
+	Name    string
+	Version string
+}
+
+// ClientInfoFromSession extracts client info from a server session
+func ClientInfoFromSession(session *mcp.ServerSession) ClientInfo {
+	if session == nil {
+		return ClientInfo{}
 	}
-	return clientInfo
+	initParams := session.InitializeParams()
+	if initParams == nil || initParams.ClientInfo == nil {
+		return ClientInfo{}
+	}
+	return ClientInfo{
+		Name:    initParams.ClientInfo.Name,
+		Version: initParams.ClientInfo.Version,
+	}
 }
 
 var re = regexp.MustCompile(`^python(\d+(\.\d+)?(\.\d+)?)?(\.exe)?$`)
@@ -222,4 +245,35 @@ func IsJSON(s string) bool {
 	var js interface{}
 	err := json.Unmarshal([]byte(s), &js)
 	return err == nil
+}
+
+// NewToolResultText creates a CallToolResult with a text content
+func NewToolResultText(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: text},
+		},
+	}
+}
+
+// NewToolResultError creates a CallToolResult with an error
+func NewToolResultError(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: text},
+		},
+		IsError: true,
+	}
+}
+
+// getRequestArguments extracts arguments from a CallToolRequest
+func getRequestArguments(req *mcp.CallToolRequest) map[string]any {
+	if req.Params.Arguments == nil {
+		return make(map[string]any)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return make(map[string]any)
+	}
+	return args
 }

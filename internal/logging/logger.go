@@ -17,29 +17,38 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	frameworkLogging "github.com/snyk/go-application-framework/pkg/logging"
 )
 
 const SNYK_MCP = "snyk-mcp"
 
+// mcpWriter is a zerolog.LevelWriter that sends log messages to all connected MCP clients
 type mcpWriter struct {
-	writeChan chan mcp.LoggingMessageNotification
+	writeChan chan logMessage
 	readyChan chan bool
-	server    *server.MCPServer
+	server    *mcp.Server
 }
 
-func New(server *server.MCPServer) zerolog.LevelWriter {
+type logMessage struct {
+	level   mcp.LoggingLevel
+	logger  string
+	message string
+}
+
+// New creates a new mcpWriter that sends log messages to all connected MCP server sessions
+func New(server *mcp.Server) zerolog.LevelWriter {
 	readyChan := make(chan bool)
-	writeChan := make(chan mcp.LoggingMessageNotification, 1000000)
+	writeChan := make(chan logMessage, 1000000)
 	w := &mcpWriter{
 		writeChan: writeChan,
 		readyChan: readyChan,
@@ -56,10 +65,11 @@ func (w *mcpWriter) Write(p []byte) (n int, err error) {
 
 func (w *mcpWriter) WriteLevel(level zerolog.Level, p []byte) (n int, err error) {
 	if w.server != nil {
-		w.writeChan <- mcp.NewLoggingMessageNotification(
-			mapLogLevel(level),
-			SNYK_MCP,
-			string(p))
+		w.writeChan <- logMessage{
+			level:   mapLogLevel(level),
+			logger:  SNYK_MCP,
+			message: string(p),
+		}
 		return len(p), nil
 	}
 
@@ -69,33 +79,34 @@ func (w *mcpWriter) WriteLevel(level zerolog.Level, p []byte) (n int, err error)
 func (w *mcpWriter) startServerSenderRoutine() {
 	w.readyChan <- true
 	for msg := range w.writeChan {
-		// Send the notification to all clients - need to create a map to pass the params correctly
-		w.server.SendNotificationToAllClients(msg.Method, map[string]any{
-			"level":  string(msg.Params.Level),
-			"logger": SNYK_MCP,
-			"data":   msg.Params.Data,
-		})
+		// Send the notification to all connected sessions using Sessions() iterator
+		for ss := range w.server.Sessions() {
+			_ = ss.Log(context.Background(), &mcp.LoggingMessageParams{
+				Level:  msg.level,
+				Logger: msg.logger,
+				Data:   msg.message,
+			})
+		}
 	}
 }
 
-func mapLogLevel(level zerolog.Level) (mt mcp.LoggingLevel) {
+func mapLogLevel(level zerolog.Level) mcp.LoggingLevel {
 	switch level {
 	case zerolog.PanicLevel:
 		fallthrough
 	case zerolog.FatalLevel:
-		mt = mcp.LoggingLevelCritical
+		return "critical"
 	case zerolog.ErrorLevel:
-		mt = mcp.LoggingLevelError
+		return "error"
 	case zerolog.WarnLevel:
-		mt = mcp.LoggingLevelWarning
+		return "warning"
 	case zerolog.InfoLevel:
-		mt = mcp.LoggingLevelInfo
+		return "info"
 	case zerolog.DebugLevel:
-		mt = mcp.LoggingLevelDebug
+		return "debug"
 	default:
-		mt = mcp.LoggingLevelInfo
+		return "info"
 	}
-	return mt
 }
 
 func getConsoleWriter(writer io.Writer) zerolog.ConsoleWriter {
@@ -117,7 +128,8 @@ func getConsoleWriter(writer io.Writer) zerolog.ConsoleWriter {
 	return w
 }
 
-func ConfigureLogging(server *server.MCPServer) *zerolog.Logger {
+// ConfigureLogging sets up logging for the MCP server
+func ConfigureLogging(server *mcp.Server) *zerolog.Logger {
 	logLevel := zerolog.InfoLevel
 
 	if envLogLevel := os.Getenv("SNYK_LOG_LEVEL"); envLogLevel != "" {
@@ -156,4 +168,24 @@ func ConfigureLogging(server *server.MCPServer) *zerolog.Logger {
 		Level(logLevel)
 
 	return &logger
+}
+
+// NewSlogLogger creates an slog.Logger for use with MCP ServerOptions
+func NewSlogLogger() *slog.Logger {
+	logLevel := slog.LevelInfo
+
+	if envLogLevel := os.Getenv("SNYK_LOG_LEVEL"); envLogLevel != "" {
+		switch envLogLevel {
+		case "debug", "trace":
+			logLevel = slog.LevelDebug
+		case "warn", "warning":
+			logLevel = slog.LevelWarn
+		case "error":
+			logLevel = slog.LevelError
+		}
+	}
+
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
 }

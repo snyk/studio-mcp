@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pkg/browser"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -42,6 +42,15 @@ const (
 	TrustedFoldersConfigKey = "TRUSTED_FOLDERS"
 	DisableTrustFlag        = "disable-trust"
 )
+
+// newToolResultText creates a CallToolResult with text content
+func newToolResultText(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: text},
+		},
+	}
+}
 
 type FolderTrust struct {
 	logger *zerolog.Logger
@@ -246,7 +255,7 @@ func (t *FolderTrust) addHttpHandlers(logger zerolog.Logger, mux *http.ServeMux,
 		logger.Info().Str("path", folderPath).Msg("User chose to trust folder")
 		t.AddTrustedFolder(folderPath)
 		logger.Info().Msg("Folder trusted successfully.")
-		resultChan <- mcp.NewToolResultText("Folder '" + folderPath + "' is now trusted.")
+		resultChan <- newToolResultText("Folder '" + folderPath + "' is now trusted.")
 	})
 
 	mux.HandleFunc("/cancel", func(w http.ResponseWriter, r *http.Request) {
