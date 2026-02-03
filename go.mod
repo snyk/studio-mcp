@@ -18,7 +18,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rs/zerolog v1.34.0
 	github.com/snyk/code-client-go v1.24.5
-	github.com/snyk/go-application-framework v0.0.0-20260126103810-195f34e2e0a2
+	github.com/snyk/go-application-framework v0.0.0-20260202103514-24f6db41a35d
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
