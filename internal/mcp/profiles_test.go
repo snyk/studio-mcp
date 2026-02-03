@@ -17,11 +17,21 @@
 package mcp
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// loadToolsForTest parses the embedded snyk_tools.json for testing
+func loadToolsForTest() (*SnykMcpTools, error) {
+	var config SnykMcpTools
+	if err := json.Unmarshal([]byte(snykToolsJson), &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
 
 func TestParseProfile(t *testing.T) {
 	testCases := []struct {
@@ -140,95 +150,109 @@ func TestGetProfile(t *testing.T) {
 }
 
 func TestIsToolInProfile(t *testing.T) {
-	testCases := []struct {
-		name     string
-		profiles []string
-		profile  Profile
-		expected bool
-	}{
-		// Lite profile tests
-		{
-			name:     "tool with lite profile is included in lite",
-			profiles: []string{"lite"},
-			profile:  ProfileLite,
-			expected: true,
-		},
-		{
-			name:     "tool with no profiles is not included in lite",
-			profiles: []string{},
-			profile:  ProfileLite,
-			expected: false,
-		},
-		{
-			name:     "tool with experimental profile is not included in lite",
-			profiles: []string{"experimental"},
-			profile:  ProfileLite,
-			expected: false,
-		},
+	// This test verifies that every tool in snyk_tools.json is correctly
+	// included/excluded from each profile based on its profiles configuration.
+	//
+	// The implementation does exact matching: a tool is included in a profile
+	// only if its profiles array contains that profile name.
 
-		// Full profile tests
-		{
-			name:     "tool with lite profile is included in full",
-			profiles: []string{"lite"},
-			profile:  ProfileFull,
-			expected: true,
-		},
-		{
-			name:     "tool with no profiles is included in full",
-			profiles: []string{},
-			profile:  ProfileFull,
-			expected: true,
-		},
-		{
-			name:     "tool with only experimental profile is not included in full",
-			profiles: []string{"experimental"},
-			profile:  ProfileFull,
-			expected: false,
-		},
-		{
-			name:     "tool with lite and experimental profiles are not included in full",
-			profiles: []string{"lite", "experimental"},
-			profile:  ProfileFull,
-			expected: false,
-		},
-		// Experimental profile tests
-		{
-			name:     "tool with lite profile is included in experimental",
-			profiles: []string{"lite"},
-			profile:  ProfileExperimental,
-			expected: true,
-		},
-		{
-			name:     "tool with no profiles is included in experimental",
-			profiles: []string{},
-			profile:  ProfileExperimental,
-			expected: true,
-		},
-		{
-			name:     "tool with experimental profile is included in experimental",
-			profiles: []string{"experimental"},
-			profile:  ProfileExperimental,
-			expected: true,
-		},
-		// Case insensitivity tests
-		{
-			name:     "profile matching is case insensitive",
-			profiles: []string{"LITE"},
-			profile:  ProfileLite,
-			expected: true,
-		},
+	// Expected profile membership for each tool based on snyk_tools.json
+	toolProfileExpectations := []struct {
+		toolName       string
+		inLite         bool
+		inFull         bool
+		inExperimental bool
+	}{
+		// Tools in all profiles (lite, full, experimental)
+		{"snyk_auth", true, true, true},
+		{"snyk_sca_scan", true, true, true},
+		{"snyk_code_scan", true, true, true},
+		{"snyk_version", true, true, true},
+		{"snyk_logout", true, true, true},
+		{"snyk_trust", true, true, true},
+		{"snyk_send_feedback", true, true, true},
+
+		// Tools in full and experimental only
+		{"snyk_container_scan", false, true, true},
+		{"snyk_iac_scan", false, true, true},
+		{"snyk_sbom_scan", false, true, true},
+		{"snyk_aibom", false, true, true},
+
+		// Tools in experimental only
+		{"snyk_package_health", false, false, true},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			toolDef := SnykMcpToolsDefinition{
-				Name:     "test_tool",
-				Profiles: tc.profiles,
-			}
+	// Load actual tools from JSON
+	tools, err := loadToolsForTest()
+	require.NoError(t, err, "Failed to load snyk_tools.json")
 
-			result := IsToolInProfile(toolDef, tc.profile)
+	// Create a map for quick lookup
+	toolMap := make(map[string]SnykMcpToolsDefinition)
+	for _, tool := range tools.Tools {
+		toolMap[tool.Name] = tool
+	}
 
-			assert.Equal(t, tc.expected, result)
+	// Verify all expected tools exist in the JSON
+	for _, expected := range toolProfileExpectations {
+		_, exists := toolMap[expected.toolName]
+		require.True(t, exists, "Tool %q defined in test expectations but not found in snyk_tools.json", expected.toolName)
+	}
+
+	// Verify no tools in JSON are missing from expectations
+	expectedToolNames := make(map[string]bool)
+	for _, expected := range toolProfileExpectations {
+		expectedToolNames[expected.toolName] = true
+	}
+	for _, tool := range tools.Tools {
+		require.True(t, expectedToolNames[tool.Name],
+			"Tool %q exists in snyk_tools.json but is not defined in test expectations - please add it", tool.Name)
+	}
+
+	// Test each tool against each profile
+	for _, expected := range toolProfileExpectations {
+		tool := toolMap[expected.toolName]
+
+		t.Run(expected.toolName, func(t *testing.T) {
+			assert.Equal(t, expected.inLite, IsToolInProfile(tool, ProfileLite),
+				"lite profile mismatch (profiles: %v)", tool.Profiles)
+			assert.Equal(t, expected.inFull, IsToolInProfile(tool, ProfileFull),
+				"full profile mismatch (profiles: %v)", tool.Profiles)
+			assert.Equal(t, expected.inExperimental, IsToolInProfile(tool, ProfileExperimental),
+				"experimental profile mismatch (profiles: %v)", tool.Profiles)
 		})
 	}
+}
+
+func TestIsToolInProfile_CaseInsensitive(t *testing.T) {
+	// Verify that profile matching is case insensitive
+	toolDef := SnykMcpToolsDefinition{
+		Name:     "test_tool",
+		Profiles: []string{"LITE", "Full", "EXPERIMENTAL"},
+	}
+
+	assert.True(t, IsToolInProfile(toolDef, ProfileLite), "Should match LITE case-insensitively")
+	assert.True(t, IsToolInProfile(toolDef, ProfileFull), "Should match Full case-insensitively")
+	assert.True(t, IsToolInProfile(toolDef, ProfileExperimental), "Should match EXPERIMENTAL case-insensitively")
+}
+
+func TestIsToolInProfile_EmptyProfiles(t *testing.T) {
+	// A tool with no profiles should not be included in any profile
+	toolDef := SnykMcpToolsDefinition{
+		Name:     "test_tool",
+		Profiles: []string{},
+	}
+
+	assert.False(t, IsToolInProfile(toolDef, ProfileLite), "Empty profiles should not match lite")
+	assert.False(t, IsToolInProfile(toolDef, ProfileFull), "Empty profiles should not match full")
+	assert.False(t, IsToolInProfile(toolDef, ProfileExperimental), "Empty profiles should not match experimental")
+}
+
+func TestIsToolInProfile_DefaultProfile(t *testing.T) {
+	// When profile is empty string, it should default to DefaultProfile (full)
+	toolDef := SnykMcpToolsDefinition{
+		Name:     "test_tool",
+		Profiles: []string{"full"},
+	}
+
+	assert.True(t, IsToolInProfile(toolDef, ""), "Empty profile should default to full")
 }
