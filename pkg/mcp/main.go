@@ -48,6 +48,7 @@ func Init(engine workflow.Engine) error {
 
 	mcpFlags.Bool(trust.DisableTrustFlag, false, "disable folder trust")
 	mcpFlags.StringP(shared.OutputDirParam, "o", "", "specifies the output directory for scan responses")
+	mcpFlags.StringP(mcp.ProfileFlagName, "p", "", "sets the tool profile <lite|full|experimental>. 'full' (default) includes all non-experimental tools, 'lite' includes essential tools only, 'experimental' includes all tools")
 
 	configureFlags := pflag.NewFlagSet("configure", pflag.ContinueOnError)
 	configureFlags.StringP(shared.ToolNameParam, "t", "", "automatically configure snyk mcp server for a tool. supported tools: cursor, windsurf, antigravity, copilot, gemini-cli, claude-cli")

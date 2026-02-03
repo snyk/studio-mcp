@@ -126,7 +126,7 @@ func getToolWithName(t *testing.T, tools *SnykMcpTools, toolName string) *SnykMc
 
 func TestMcpSnykToolRegistration(t *testing.T) {
 	fixture := setupTestFixture(t)
-	err := fixture.binding.addSnykTools(fixture.invocationContext)
+	err := fixture.binding.addSnykTools(fixture.invocationContext, ProfileFull)
 	require.NoError(t, err)
 }
 
@@ -1796,4 +1796,145 @@ func whoamiWorkflowResponse(t *testing.T) (*authentication.ActiveUser, []workflo
 			expectedUserJSON),
 	}
 	return &expectedUser, expectedUserData
+}
+
+func TestAddSnykToolsWithProfile(t *testing.T) {
+	testCases := []struct {
+		name            string
+		profile         Profile
+		expectedTools   []string
+		unexpectedTools []string
+	}{
+		{
+			name:    "lite profile registers only lite tools",
+			profile: ProfileLite,
+			expectedTools: []string{
+				"snyk_auth",
+				"snyk_sca_scan",
+				"snyk_code_scan",
+				"snyk_version",
+				"snyk_logout",
+				"snyk_trust",
+				"snyk_send_feedback",
+			},
+			unexpectedTools: []string{
+				"snyk_container_scan",
+				"snyk_iac_scan",
+				"snyk_sbom_scan",
+				"snyk_aibom",
+				"snyk_package_health",
+			},
+		},
+		{
+			name:    "full profile excludes experimental tools",
+			profile: ProfileFull,
+			expectedTools: []string{
+				"snyk_auth",
+				"snyk_sca_scan",
+				"snyk_code_scan",
+				"snyk_version",
+				"snyk_logout",
+				"snyk_trust",
+				"snyk_send_feedback",
+				"snyk_container_scan",
+				"snyk_iac_scan",
+				"snyk_sbom_scan",
+				"snyk_aibom",
+			},
+			unexpectedTools: []string{
+				"snyk_package_health",
+			},
+		},
+		{
+			name:    "experimental profile includes all tools",
+			profile: ProfileExperimental,
+			expectedTools: []string{
+				"snyk_auth",
+				"snyk_sca_scan",
+				"snyk_code_scan",
+				"snyk_version",
+				"snyk_logout",
+				"snyk_trust",
+				"snyk_send_feedback",
+				"snyk_container_scan",
+				"snyk_iac_scan",
+				"snyk_sbom_scan",
+				"snyk_aibom",
+				"snyk_package_health",
+			},
+			unexpectedTools: []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Load tools from JSON and filter by profile
+			config, err := loadMcpToolsFromJson()
+			require.NoError(t, err)
+
+			// Build map of tools that would be registered for this profile
+			registeredToolNames := make(map[string]bool)
+			for _, toolDef := range config.Tools {
+				if IsToolInProfile(toolDef, tc.profile) {
+					registeredToolNames[toolDef.Name] = true
+				}
+			}
+
+			// Verify expected tools would be registered
+			for _, expectedTool := range tc.expectedTools {
+				require.True(t, registeredToolNames[expectedTool],
+					"Expected tool %s to be registered for profile %s", expectedTool, tc.profile)
+			}
+
+			// Verify unexpected tools would NOT be registered
+			for _, unexpectedTool := range tc.unexpectedTools {
+				require.False(t, registeredToolNames[unexpectedTool],
+					"Expected tool %s to NOT be registered for profile %s", unexpectedTool, tc.profile)
+			}
+		})
+	}
+}
+
+func TestToolProfileAssignmentsInJson(t *testing.T) {
+	config, err := loadMcpToolsFromJson()
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
+	// Verify all tools have profiles field parsed correctly
+	for _, tool := range config.Tools {
+		t.Run(tool.Name, func(t *testing.T) {
+			// Profiles field should exist (even if empty)
+			require.NotNil(t, tool.Profiles, "Tool %s should have Profiles field", tool.Name)
+
+			// Verify profile-based filtering works for each tool
+			switch tool.Name {
+			case "snyk_auth", "snyk_sca_scan", "snyk_code_scan", "snyk_version", "snyk_logout", "snyk_trust", "snyk_send_feedback":
+				// These should be in lite profile
+				require.True(t, IsToolInProfile(tool, ProfileLite),
+					"Tool %s should be in lite profile", tool.Name)
+				require.True(t, IsToolInProfile(tool, ProfileFull),
+					"Tool %s should be in full profile", tool.Name)
+				require.True(t, IsToolInProfile(tool, ProfileExperimental),
+					"Tool %s should be in experimental profile", tool.Name)
+
+			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom":
+				// These should be in full but not lite
+				require.False(t, IsToolInProfile(tool, ProfileLite),
+					"Tool %s should NOT be in lite profile", tool.Name)
+				require.True(t, IsToolInProfile(tool, ProfileFull),
+					"Tool %s should be in full profile", tool.Name)
+				require.True(t, IsToolInProfile(tool, ProfileExperimental),
+					"Tool %s should be in experimental profile", tool.Name)
+
+			case "snyk_package_health":
+				// These should be experimental only
+				require.False(t, IsToolInProfile(tool, ProfileLite),
+					"Tool %s should NOT be in lite profile", tool.Name)
+				require.False(t, IsToolInProfile(tool, ProfileFull),
+					"Tool %s should NOT be in full profile", tool.Name)
+				require.True(t, IsToolInProfile(tool, ProfileExperimental),
+					"Tool %s should be in experimental profile", tool.Name)
+			}
+		})
+	}
 }

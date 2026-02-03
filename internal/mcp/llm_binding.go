@@ -99,7 +99,14 @@ func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) erro
 
 	m.folderTrust = trust.NewFolderTrust(m.logger, invocationContext.GetConfiguration())
 
-	err := m.addSnykTools(invocationContext)
+	profileStr := invocationContext.GetConfiguration().GetString(ProfileFlagName)
+	profile, err := GetProfile(profileStr)
+	if err != nil {
+		m.logger.Warn().Err(err).Str("profile", profileStr).Msg("Invalid profile specified, using default")
+		profile = DefaultProfile
+	}
+
+	err = m.addSnykTools(invocationContext, profile)
 	if err != nil {
 		return err
 	}

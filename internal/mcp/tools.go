@@ -71,6 +71,7 @@ type SnykMcpToolsDefinition struct {
 	Description    string                 `json:"description"`
 	Command        []string               `json:"command"`
 	StandardParams []string               `json:"standardParams"`
+	Profiles       []string               `json:"profiles"`
 	IgnoreTrust    bool                   `json:"ignoreTrust"`
 	IgnoreAuth     bool                   `json:"ignoreAuth"`
 	OutputMapper   string                 `json:"outputMapper"`
@@ -110,7 +111,7 @@ func loadMcpToolsFromJson() (*SnykMcpTools, error) {
 	return &config, nil
 }
 
-func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext) error {
+func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, profile Profile) error {
 	config, err := loadMcpToolsFromJson()
 
 	if err != nil || config == nil {
@@ -118,7 +119,15 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext) e
 		return err
 	}
 
+	m.logger.Info().Str("profile", string(profile)).Msg("Loading tools for profile")
+	registeredCount := 0
+
 	for _, toolDef := range config.Tools {
+		if !IsToolInProfile(toolDef, profile) {
+			m.logger.Debug().Str("tool", toolDef.Name).Str("profile", string(profile)).Msg("Skipping tool not in profile")
+			continue
+		}
+
 		tool := createToolFromDefinition(&toolDef)
 		switch toolDef.Name {
 		case SnykLogout:
@@ -134,8 +143,10 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext) e
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
 		}
+		registeredCount++
 	}
 
+	m.logger.Info().Int("count", registeredCount).Str("profile", string(profile)).Msg("Registered tools for profile")
 	return nil
 }
 
