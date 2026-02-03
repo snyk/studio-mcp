@@ -44,7 +44,7 @@ func getHostConfig(hostName string) (*hostConfig, error) {
 	case "visual studio code", "visual studio code - insiders", "vs_code":
 		return &hostConfig{
 			name:           hostName,
-			localRulesPath: filepath.Join(".github", "instructions", "snyk_rules.instructions.md"),
+			localRulesPath: filepath.Join(".github", "copilot-instructions.md"),
 		}, nil
 	case "gemini-cli":
 		return &hostConfig{

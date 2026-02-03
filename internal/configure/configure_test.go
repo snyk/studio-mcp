@@ -101,6 +101,20 @@ func TestGetHostConfig(t *testing.T) {
 			expectGlobalRulesPath: true,
 		},
 		{
+			name:                 "visual studio code",
+			hostName:             "visual studio code",
+			expectError:          false,
+			expectedName:         "visual studio code",
+			expectLocalRulesPath: true,
+		},
+		{
+			name:                 "vs_code",
+			hostName:             "vs_code",
+			expectError:          false,
+			expectedName:         "vs_code",
+			expectLocalRulesPath: true,
+		},
+		{
 			name:        "unsupported",
 			hostName:    "unsupported",
 			expectError: true,
