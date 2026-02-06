@@ -74,7 +74,7 @@ var ToolName = struct {
 	Logout:        "snyk_logout",
 	Trust:         "snyk_trust",
 	SendFeedback:  "snyk_send_feedback",
-	PackageHealth: "snyk_package_health",
+	PackageHealth: "snyk_package_health_check",
 }
 
 type SnykMcpToolsDefinition struct {
