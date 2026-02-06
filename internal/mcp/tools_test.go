@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -77,6 +78,15 @@ func setupTestFixture(t *testing.T) *testFixture {
 	invocationCtx.EXPECT().GetEnhancedLogger().Return(&logger).AnyTimes()
 	invocationCtx.EXPECT().GetRuntimeInfo().Return(runtimeinfo.New(runtimeinfo.WithName("hurz"), runtimeinfo.WithVersion("1000.8.3"))).AnyTimes()
 	invocationCtx.EXPECT().GetEngine().Return(engine).AnyTimes()
+
+	// Mock network access for updateGafConfigWithIntegrationEnvironment (GetNetworkAccess, RemoveHeaderField, AddHeaderField)
+	mockNetworkAccess := mocks.NewMockNetworkAccess(mockctl)
+	mockNetworkAccess.EXPECT().RemoveHeaderField("User-Agent").AnyTimes()
+	mockNetworkAccess.EXPECT().AddHeaderField("User-Agent", gomock.Any()).AnyTimes()
+	mockNetworkAccess.EXPECT().GetHttpClient().Return(&http.Client{}).AnyTimes()
+	invocationCtx.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+	engine.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+
 	engine.EXPECT().GetConfiguration().Return(engineConfig).AnyTimes()
 	_, expectedUserData := whoamiWorkflowResponse(t)
 	engine.EXPECT().InvokeWithConfig(localworkflows.WORKFLOWID_WHOAMI, gomock.Any()).Return(expectedUserData, nil).AnyTimes()
@@ -137,7 +147,7 @@ func TestSnykTestHandler(t *testing.T) {
 	// Configure mock CLI to return a specific JSON response
 	mockOutput := `[{"ok": false,"vulnerabilities": [{"id": "SNYK-JS-ACORN-559469","title": "Regular Expression Denial of Service (ReDoS)","severity":"high","packageName": "acorn","version": "5.5.3","identifiers": {"CVE": ["CVE-2020-7598"],"CWE": ["CWE-400"]},"fixedIn": ["5.7.4", "6.4.1", "7.1.1"],"isUpgradable": true,"isPatchable": false,"upgradePath": ["my-app@1.0.0", "acorn@7.1.1"],"from": ["my-app@1.0.0", "acorn@5.5.3"],"packageManager": "npm"},{"id": "SNYK-JS-TUNNELAGENT-1572284","title": "Uninitialized Memory Exposure","severity": "medium","packageName": "tunnel-agent","version": "0.6.0","identifiers": {"CVE": [],"CWE": ["CWE-201"]},"fixedIn": [],"isUpgradable": false,"isPatchable": false,"upgradePath": [],"from": ["my-app@1.0.0", "tunnel-agent@0.6.0"],"packageManager": "npm"}],"dependencyCount": 42,"packageManager": "npm"}]`
 	fixture.mockCliOutput(mockOutput)
-	tool := getToolWithName(t, fixture.tools, SnykScaTest)
+	tool := getToolWithName(t, fixture.tools, ToolName.ScaTest)
 	require.NotNil(t, tool)
 	// Create the handler
 	handler := fixture.binding.defaultHandler(fixture.invocationContext, *tool)
@@ -244,7 +254,7 @@ func TestSnykCodeTestHandler(t *testing.T) {
 	fixture.mockCliOutput(mockJsonResponse)
 
 	// Get the tool definition
-	toolDef := getToolWithName(t, fixture.tools, SnykCodeTest)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.CodeTest)
 
 	// Create the handler
 	handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
@@ -337,7 +347,7 @@ func TestSnykCodeAutoEnablement(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Get the tool definition
-	toolDef := getToolWithName(t, fixture.tools, SnykCodeTest)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.CodeTest)
 	require.NotNil(t, toolDef, "snyk_code_scan tool definition not found")
 
 	testCases := []struct {
@@ -469,11 +479,6 @@ func TestSnykCodeAutoEnablement(t *testing.T) {
 					config.Set(configuration.API_URL, apiURL)
 				}
 			}
-
-			// Mock network access for GAF HTTP client
-			mockNetworkAccess := mocks.NewMockNetworkAccess(gomock.NewController(t))
-			mockNetworkAccess.EXPECT().GetHttpClient().Return(&http.Client{}).AnyTimes()
-			fixture.invocationContext.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
 
 			handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
 
@@ -620,11 +625,11 @@ func TestGetSnykToolsConfig(t *testing.T) {
 	require.NotEmpty(t, config.Tools)
 
 	toolNames := map[string]bool{
-		SnykScaTest:  false,
-		SnykCodeTest: false,
-		SnykVersion:  false,
-		SnykAuth:     false,
-		SnykLogout:   false,
+		ToolName.ScaTest:  false,
+		ToolName.CodeTest: false,
+		ToolName.Version:  false,
+		ToolName.Auth:     false,
+		ToolName.Logout:   false,
 	}
 
 	for _, tool := range config.Tools {
@@ -1575,7 +1580,7 @@ func TestPrepareCmdArgsForTool(t *testing.T) {
 
 func TestSnykTrustHandler(t *testing.T) {
 	fixture := setupTestFixture(t)
-	toolDef := getToolWithName(t, fixture.tools, SnykTrust)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.Trust)
 	require.NotNil(t, toolDef, "snyk_trust tool definition not found")
 	fixture.invocationContext.GetConfiguration().Set(trust.DisableTrustFlag, false)
 
@@ -1822,7 +1827,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_iac_scan",
 				"snyk_sbom_scan",
 				"snyk_aibom",
-				"snyk_package_health",
+				"snyk_package_health_check",
 			},
 		},
 		{
@@ -1842,7 +1847,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_aibom",
 			},
 			unexpectedTools: []string{
-				"snyk_package_health",
+				"snyk_package_health_check",
 			},
 		},
 		{
@@ -1860,7 +1865,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_iac_scan",
 				"snyk_sbom_scan",
 				"snyk_aibom",
-				"snyk_package_health",
+				"snyk_package_health_check",
 			},
 			unexpectedTools: []string{},
 		},
@@ -1895,6 +1900,36 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 	}
 }
 
+func TestToolNamesMustExistInJson(t *testing.T) {
+	// This test ensures that all tool names in the ToolName struct
+	// have a corresponding tool definition in snyk_tools.json.
+	// Uses reflection to automatically validate all fields.
+
+	config, err := loadMcpToolsFromJson()
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
+	// Build a set of all tool names from JSON
+	jsonToolNames := make(map[string]bool)
+	for _, tool := range config.Tools {
+		jsonToolNames[tool.Name] = true
+	}
+
+	// Use reflection to iterate over all ToolName struct fields
+	v := reflect.ValueOf(ToolName)
+	toolNameType := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		fieldName := toolNameType.Field(i).Name
+		toolName := v.Field(i).String()
+
+		require.True(t, jsonToolNames[toolName],
+			"ToolName.%s has value %q but no tool with that name exists in snyk_tools.json. "+
+				"Ensure the value matches the 'name' field in the JSON definition.",
+			fieldName, toolName)
+	}
+}
+
 func TestToolProfileAssignmentsInJson(t *testing.T) {
 	config, err := loadMcpToolsFromJson()
 	require.NoError(t, err)
@@ -1926,7 +1961,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_package_health":
+			case "snyk_package_health_check":
 				// These should be experimental only
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)

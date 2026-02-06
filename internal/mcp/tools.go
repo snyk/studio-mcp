@@ -33,6 +33,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
+	"github.com/snyk/error-catalog-golang-public/snyk_errors"
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
@@ -54,17 +55,27 @@ const (
 	CodeAutoEnablementError = "snyk-code-0005"
 )
 
-// Tool name constants to maintain backward compatibility
-const (
-	SnykScaTest      = "snyk_sca_scan"
-	SnykCodeTest     = "snyk_code_scan"
-	SnykVersion      = "snyk_version"
-	SnykAuth         = "snyk_auth"
-	SnykLogout       = "snyk_logout"
-	SnykTrust        = "snyk_trust"
-	SnykSendFeedback = "snyk_send_feedback"
-	SnykPackageInfo  = "snyk_package_info"
-)
+// ToolName defines all custom tool names.
+// Values must match the "name" field in snyk_tools.json.
+var ToolName = struct {
+	ScaTest       string
+	CodeTest      string
+	Version       string
+	Auth          string
+	Logout        string
+	Trust         string
+	SendFeedback  string
+	PackageHealth string
+}{
+	ScaTest:       "snyk_sca_scan",
+	CodeTest:      "snyk_code_scan",
+	Version:       "snyk_version",
+	Auth:          "snyk_auth",
+	Logout:        "snyk_logout",
+	Trust:         "snyk_trust",
+	SendFeedback:  "snyk_send_feedback",
+	PackageHealth: "snyk_package_health_check",
+}
 
 type SnykMcpToolsDefinition struct {
 	Name           string                 `json:"name"`
@@ -130,15 +141,15 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, p
 
 		tool := createToolFromDefinition(&toolDef)
 		switch toolDef.Name {
-		case SnykLogout:
+		case ToolName.Logout:
 			m.mcpServer.AddTool(tool, m.snykLogoutHandler(invocationCtx, toolDef))
-		case SnykTrust:
+		case ToolName.Trust:
 			m.mcpServer.AddTool(tool, m.snykTrustHandler(invocationCtx, toolDef))
-		case SnykSendFeedback:
+		case ToolName.SendFeedback:
 			m.mcpServer.AddTool(tool, m.snykSendFeedback(invocationCtx, toolDef))
-		case SnykAuth:
+		case ToolName.Auth:
 			m.mcpServer.AddTool(tool, m.snykAuthHandler(invocationCtx, toolDef))
-		case SnykPackageInfo:
+		case ToolName.PackageHealth:
 			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
@@ -213,7 +224,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 			return nil, err
 		}
 		includeIgnores := false
-		if param, exists := params["include-ignores"]; exists && toolDef.Name == SnykCodeTest {
+		if param, exists := params["include-ignores"]; exists && toolDef.Name == ToolName.CodeTest {
 			if value, parsable := param.value.(bool); value && parsable {
 				includeIgnores = true
 				// deleting the key to not include in the CLI run
@@ -257,7 +268,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 			}
 
 			// Try Snyk Code auto-enable for snyk-code-0005 error
-			if strings.Contains(strings.ToLower(output), CodeAutoEnablementError) && toolDef.Name == SnykCodeTest {
+			if strings.Contains(strings.ToLower(output), CodeAutoEnablementError) && toolDef.Name == ToolName.CodeTest {
 				output, success = m.tryAutoEnableSnykCodeAndRetry(ctx, invocationCtx, &logger, workingDir, args, output, toolDef, includeIgnores)
 			}
 
@@ -494,6 +505,9 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		logger := m.logger.With().Str("method", "snykPackageInfoHandler").Logger()
 		logger.Debug().Str("toolName", toolDef.Name).Msg("Received call for tool")
 
+		clientInfo := ClientInfoFromContext(ctx)
+		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
+
 		// Check authentication
 		user, whoAmiErr := authentication.CallWhoAmI(&logger, invocationCtx.GetEngine())
 		if whoAmiErr != nil || user == nil {
@@ -555,11 +569,12 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		if packageVersion != "" {
 			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: packageApiVersion})
 			if err != nil {
+				var snykErr snyk_errors.Error
+				if errors.As(err, &snykErr) && snykErr.StatusCode == http.StatusNotFound {
+					return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
+				}
 				logger.Error().Err(err).Msg("Failed to fetch package version info")
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
-			}
-			if resp.StatusCode() != http.StatusOK {
-				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
 			}
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
@@ -568,11 +583,12 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		} else {
 			resp, err := apiClient.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: packageApiVersion})
 			if err != nil {
+				var snykErr snyk_errors.Error
+				if errors.As(err, &snykErr) && snykErr.StatusCode == http.StatusNotFound {
+					return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
+				}
 				logger.Error().Err(err).Msg("Failed to fetch package info")
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
-			}
-			if resp.StatusCode() != http.StatusOK {
-				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
 			}
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
