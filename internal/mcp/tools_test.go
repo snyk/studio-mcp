@@ -78,6 +78,15 @@ func setupTestFixture(t *testing.T) *testFixture {
 	invocationCtx.EXPECT().GetEnhancedLogger().Return(&logger).AnyTimes()
 	invocationCtx.EXPECT().GetRuntimeInfo().Return(runtimeinfo.New(runtimeinfo.WithName("hurz"), runtimeinfo.WithVersion("1000.8.3"))).AnyTimes()
 	invocationCtx.EXPECT().GetEngine().Return(engine).AnyTimes()
+
+	// Mock network access for updateGafConfigWithIntegrationEnvironment (GetNetworkAccess, RemoveHeaderField, AddHeaderField)
+	mockNetworkAccess := mocks.NewMockNetworkAccess(mockctl)
+	mockNetworkAccess.EXPECT().RemoveHeaderField("User-Agent").AnyTimes()
+	mockNetworkAccess.EXPECT().AddHeaderField("User-Agent", gomock.Any()).AnyTimes()
+	mockNetworkAccess.EXPECT().GetHttpClient().Return(&http.Client{}).AnyTimes()
+	invocationCtx.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+	engine.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+
 	engine.EXPECT().GetConfiguration().Return(engineConfig).AnyTimes()
 	_, expectedUserData := whoamiWorkflowResponse(t)
 	engine.EXPECT().InvokeWithConfig(localworkflows.WORKFLOWID_WHOAMI, gomock.Any()).Return(expectedUserData, nil).AnyTimes()
@@ -470,11 +479,6 @@ func TestSnykCodeAutoEnablement(t *testing.T) {
 					config.Set(configuration.API_URL, apiURL)
 				}
 			}
-
-			// Mock network access for GAF HTTP client
-			mockNetworkAccess := mocks.NewMockNetworkAccess(gomock.NewController(t))
-			mockNetworkAccess.EXPECT().GetHttpClient().Return(&http.Client{}).AnyTimes()
-			fixture.invocationContext.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
 
 			handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
 
@@ -1823,7 +1827,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_iac_scan",
 				"snyk_sbom_scan",
 				"snyk_aibom",
-				"snyk_package_health",
+				"snyk_package_health_check",
 			},
 		},
 		{
@@ -1843,7 +1847,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_aibom",
 			},
 			unexpectedTools: []string{
-				"snyk_package_health",
+				"snyk_package_health_check",
 			},
 		},
 		{
@@ -1861,7 +1865,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_iac_scan",
 				"snyk_sbom_scan",
 				"snyk_aibom",
-				"snyk_package_health",
+				"snyk_package_health_check",
 			},
 			unexpectedTools: []string{},
 		},
@@ -1957,7 +1961,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_package_health":
+			case "snyk_package_health_check":
 				// These should be experimental only
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
