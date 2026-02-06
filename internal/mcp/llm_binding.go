@@ -33,6 +33,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
+	gafNetworking "github.com/snyk/go-application-framework/pkg/networking"
 	"github.com/snyk/studio-mcp/internal/logging"
 	"github.com/snyk/studio-mcp/internal/networking"
 	"github.com/snyk/studio-mcp/internal/trust"
@@ -243,17 +244,27 @@ func (m *McpLLMBinding) Started() bool {
 }
 
 func (m *McpLLMBinding) updateGafConfigWithIntegrationEnvironment(invocationCtx workflow.InvocationContext, environmentName, environmentVersion string) {
-	getConfiguration := invocationCtx.GetEngine().GetConfiguration()
-	getConfiguration.Set(configuration.INTEGRATION_NAME, "MCP")
+	globalConfig := invocationCtx.GetEngine().GetConfiguration()
+	globalConfig.Set(configuration.INTEGRATION_NAME, "MCP")
 
 	integrationVersion := "unknown"
 	runtimeInfo := invocationCtx.GetRuntimeInfo()
 	if runtimeInfo != nil {
 		integrationVersion = runtimeInfo.GetVersion()
 	}
-	getConfiguration.Set(configuration.INTEGRATION_VERSION, integrationVersion)
-	getConfiguration.Set(configuration.INTEGRATION_ENVIRONMENT, environmentName)
-	getConfiguration.Set(configuration.INTEGRATION_ENVIRONMENT_VERSION, environmentVersion)
+	globalConfig.Set(configuration.INTEGRATION_VERSION, integrationVersion)
+	globalConfig.Set(configuration.INTEGRATION_ENVIRONMENT, environmentName)
+	globalConfig.Set(configuration.INTEGRATION_ENVIRONMENT_VERSION, environmentVersion)
+
+	ua := gafNetworking.UserAgent(gafNetworking.UaWithConfig(globalConfig), gafNetworking.UaWithRuntimeInfo(runtimeInfo))
+	networkAccess := invocationCtx.GetNetworkAccess()
+	networkAccess.RemoveHeaderField("User-Agent")
+	networkAccess.AddHeaderField("User-Agent", ua.String())
+
+	globalNetworkAccess := invocationCtx.GetEngine().GetNetworkAccess()
+	globalNetworkAccess.RemoveHeaderField("User-Agent")
+	globalNetworkAccess.AddHeaderField("User-Agent", ua.String())
+
 }
 
 func (m *McpLLMBinding) expandedEnv(invocationCtx workflow.InvocationContext, integrationVersion, environmentName, environmentVersion string) []string {

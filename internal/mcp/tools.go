@@ -505,6 +505,9 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		logger := m.logger.With().Str("method", "snykPackageInfoHandler").Logger()
 		logger.Debug().Str("toolName", toolDef.Name).Msg("Received call for tool")
 
+		clientInfo := ClientInfoFromContext(ctx)
+		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
+
 		// Check authentication
 		user, whoAmiErr := authentication.CallWhoAmI(&logger, invocationCtx.GetEngine())
 		if whoAmiErr != nil || user == nil {
