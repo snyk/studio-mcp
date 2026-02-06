@@ -33,6 +33,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
+	"github.com/snyk/error-catalog-golang-public/snyk_errors"
 	"github.com/snyk/go-application-framework/pkg/auth"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
@@ -565,11 +566,12 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		if packageVersion != "" {
 			resp, err := apiClient.GetPackageVersionWithResponse(ctx, orgId, ecosystem, packageName, packageVersion, &packageapi.GetPackageVersionParams{Version: packageApiVersion})
 			if err != nil {
+				var snykErr snyk_errors.Error
+				if errors.As(err, &snykErr) && snykErr.StatusCode == http.StatusNotFound {
+					return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
+				}
 				logger.Error().Err(err).Msg("Failed to fetch package version info")
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
-			}
-			if resp.StatusCode() != http.StatusOK {
-				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
 			}
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
@@ -578,11 +580,12 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 		} else {
 			resp, err := apiClient.GetPackageWithResponse(ctx, orgId, ecosystem, packageName, &packageapi.GetPackageParams{Version: packageApiVersion})
 			if err != nil {
+				var snykErr snyk_errors.Error
+				if errors.As(err, &snykErr) && snykErr.StatusCode == http.StatusNotFound {
+					return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
+				}
 				logger.Error().Err(err).Msg("Failed to fetch package info")
 				return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to fetch package info: %s", err.Error())), nil
-			}
-			if resp.StatusCode() != http.StatusOK {
-				return mcp.NewToolResultText(insufficientPackageInfoMsg), nil
 			}
 			if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil || resp.ApplicationvndApiJSON200.Data.Attributes == nil {
 				return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
