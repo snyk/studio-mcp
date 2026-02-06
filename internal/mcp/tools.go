@@ -54,17 +54,27 @@ const (
 	CodeAutoEnablementError = "snyk-code-0005"
 )
 
-// Tool name constants to maintain backward compatibility
-const (
-	SnykScaTest      = "snyk_sca_scan"
-	SnykCodeTest     = "snyk_code_scan"
-	SnykVersion      = "snyk_version"
-	SnykAuth         = "snyk_auth"
-	SnykLogout       = "snyk_logout"
-	SnykTrust        = "snyk_trust"
-	SnykSendFeedback = "snyk_send_feedback"
-	SnykPackageInfo  = "snyk_package_info"
-)
+// ToolName defines all custom tool names.
+// Values must match the "name" field in snyk_tools.json.
+var ToolName = struct {
+	ScaTest       string
+	CodeTest      string
+	Version       string
+	Auth          string
+	Logout        string
+	Trust         string
+	SendFeedback  string
+	PackageHealth string
+}{
+	ScaTest:       "snyk_sca_scan",
+	CodeTest:      "snyk_code_scan",
+	Version:       "snyk_version",
+	Auth:          "snyk_auth",
+	Logout:        "snyk_logout",
+	Trust:         "snyk_trust",
+	SendFeedback:  "snyk_send_feedback",
+	PackageHealth: "snyk_package_health",
+}
 
 type SnykMcpToolsDefinition struct {
 	Name           string                 `json:"name"`
@@ -130,15 +140,15 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, p
 
 		tool := createToolFromDefinition(&toolDef)
 		switch toolDef.Name {
-		case SnykLogout:
+		case ToolName.Logout:
 			m.mcpServer.AddTool(tool, m.snykLogoutHandler(invocationCtx, toolDef))
-		case SnykTrust:
+		case ToolName.Trust:
 			m.mcpServer.AddTool(tool, m.snykTrustHandler(invocationCtx, toolDef))
-		case SnykSendFeedback:
+		case ToolName.SendFeedback:
 			m.mcpServer.AddTool(tool, m.snykSendFeedback(invocationCtx, toolDef))
-		case SnykAuth:
+		case ToolName.Auth:
 			m.mcpServer.AddTool(tool, m.snykAuthHandler(invocationCtx, toolDef))
-		case SnykPackageInfo:
+		case ToolName.PackageHealth:
 			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
@@ -213,7 +223,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 			return nil, err
 		}
 		includeIgnores := false
-		if param, exists := params["include-ignores"]; exists && toolDef.Name == SnykCodeTest {
+		if param, exists := params["include-ignores"]; exists && toolDef.Name == ToolName.CodeTest {
 			if value, parsable := param.value.(bool); value && parsable {
 				includeIgnores = true
 				// deleting the key to not include in the CLI run
@@ -257,7 +267,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 			}
 
 			// Try Snyk Code auto-enable for snyk-code-0005 error
-			if strings.Contains(strings.ToLower(output), CodeAutoEnablementError) && toolDef.Name == SnykCodeTest {
+			if strings.Contains(strings.ToLower(output), CodeAutoEnablementError) && toolDef.Name == ToolName.CodeTest {
 				output, success = m.tryAutoEnableSnykCodeAndRetry(ctx, invocationCtx, &logger, workingDir, args, output, toolDef, includeIgnores)
 			}
 
