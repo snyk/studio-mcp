@@ -52,37 +52,57 @@ func TestGetHostConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name                  string
-		hostName              string
-		expectError           bool
-		expectedName          string
-		expectMcpGlobalConfig bool
-		expectLocalRulesPath  bool
-		expectGlobalRulesPath bool
+		name                       string
+		hostName                   string
+		expectError                bool
+		expectedName               string
+		expectMcpGlobalConfig      bool
+		expectLocalRulesPath       bool
+		expectGlobalRulesPath      bool
+		expectGlobalSkillsPath     bool
+		expectLegacyLocalRulesPath bool
 	}{
 		{
-			name:                  "cursor",
-			hostName:              "cursor",
-			expectError:           false,
-			expectedName:          "cursor",
-			expectMcpGlobalConfig: true,
-			expectLocalRulesPath:  true,
+			name:                   "cursor",
+			hostName:               "cursor",
+			expectError:            false,
+			expectedName:           "cursor",
+			expectMcpGlobalConfig:  true,
+			expectGlobalSkillsPath: true,
 		},
 		{
-			name:                  "windsurf",
-			hostName:              "windsurf",
-			expectError:           false,
-			expectedName:          "windsurf",
-			expectMcpGlobalConfig: true,
-			expectLocalRulesPath:  true,
+			name:                       "windsurf",
+			hostName:                   "windsurf",
+			expectError:                false,
+			expectedName:               "windsurf",
+			expectMcpGlobalConfig:      true,
+			expectGlobalRulesPath:      true,
+			expectLegacyLocalRulesPath: true,
 		},
 		{
-			name:                  "antigravity",
-			hostName:              "antigravity",
-			expectError:           false,
-			expectedName:          "antigravity",
-			expectMcpGlobalConfig: true,
-			expectLocalRulesPath:  true,
+			name:                       "antigravity",
+			hostName:                   "antigravity",
+			expectError:                false,
+			expectedName:               "antigravity",
+			expectMcpGlobalConfig:      true,
+			expectGlobalRulesPath:      true,
+			expectLegacyLocalRulesPath: true,
+		},
+		{
+			name:                       "visual studio code",
+			hostName:                   "visual studio code",
+			expectError:                false,
+			expectedName:               "visual studio code",
+			expectGlobalRulesPath:      true,
+			expectLegacyLocalRulesPath: true,
+		},
+		{
+			name:                       "visual studio code - insiders",
+			hostName:                   "visual studio code - insiders",
+			expectError:                false,
+			expectedName:               "visual studio code - insiders",
+			expectGlobalRulesPath:      true,
+			expectLegacyLocalRulesPath: true,
 		},
 		{
 			name:                  "gemini-cli",
@@ -128,6 +148,71 @@ func TestGetHostConfig(t *testing.T) {
 				assert.NotEmpty(t, config.globalRulesPath)
 				assert.Contains(t, config.globalRulesPath, homeDir)
 			}
+			if tt.expectGlobalSkillsPath {
+				assert.NotEmpty(t, config.globalSkillsPath)
+				assert.Contains(t, config.globalSkillsPath, homeDir)
+			}
+			if tt.expectLegacyLocalRulesPath {
+				assert.NotEmpty(t, config.legacyLocalRulesPath)
+			}
+		})
+	}
+}
+
+func TestGetHostConfig_VSCodePaths(t *testing.T) {
+	configDir, err := os.UserConfigDir()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name                        string
+		hostName                    string
+		expectedGlobalRulesDir      string
+		expectedGlobalRulesFilename string
+		expectedLegacyLocalPath     string
+	}{
+		{
+			name:                        "visual studio code uses Code directory under UserConfigDir",
+			hostName:                    "visual studio code",
+			expectedGlobalRulesDir:      filepath.Join(configDir, "Code", "User", "prompts"),
+			expectedGlobalRulesFilename: "snyk_rules.instructions.md",
+			expectedLegacyLocalPath:     filepath.Join(".github", "instructions", "snyk_rules.instructions.md"),
+		},
+		{
+			name:                        "visual studio code insiders uses Code - Insiders directory",
+			hostName:                    "visual studio code - insiders",
+			expectedGlobalRulesDir:      filepath.Join(configDir, "Code - Insiders", "User", "prompts"),
+			expectedGlobalRulesFilename: "snyk_rules.instructions.md",
+			expectedLegacyLocalPath:     filepath.Join(".github", "instructions", "snyk_rules.instructions.md"),
+		},
+		{
+			name:                        "vs_code alias uses Code directory",
+			hostName:                    "vs_code",
+			expectedGlobalRulesDir:      filepath.Join(configDir, "Code", "User", "prompts"),
+			expectedGlobalRulesFilename: "snyk_rules.instructions.md",
+			expectedLegacyLocalPath:     filepath.Join(".github", "instructions", "snyk_rules.instructions.md"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := getHostConfig(tt.hostName)
+			require.NoError(t, err)
+
+			// Verify global rules path is constructed from UserConfigDir
+			assert.Equal(t, filepath.Join(tt.expectedGlobalRulesDir, tt.expectedGlobalRulesFilename), config.globalRulesPath)
+			assert.Contains(t, config.globalRulesPath, configDir)
+
+			// Verify no local rules path (migrated to global)
+			assert.Empty(t, config.localRulesPath)
+
+			// Verify legacy local rules path for cleanup
+			assert.Equal(t, tt.expectedLegacyLocalPath, config.legacyLocalRulesPath)
+
+			// Verify no MCP config path (VS Code uses its own extension mechanism)
+			assert.Empty(t, config.mcpGlobalConfigPath)
+
+			// Verify no skills path (VS Code uses rules, not skills)
+			assert.Empty(t, config.globalSkillsPath)
 		})
 	}
 }
@@ -920,6 +1005,108 @@ func TestGitIgnoreLocalRulesFile(t *testing.T) {
 		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
 		err := gitIgnoreLocalRulesFile(tempDir, relativeRulesPath, logger)
 		assert.Error(t, err)
+	})
+}
+
+func TestWriteGlobalSkills(t *testing.T) {
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+	skillsContent := "---\nname: snyk-rules\ndescription: Test skill\n---\n\n# Test Skills\nSkill content"
+
+	t.Run("creates skills file without delimiters", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "snyk-rules", "SKILL.md")
+
+		err := writeGlobalSkills(targetFile, skillsContent, logger)
+		require.NoError(t, err)
+
+		assert.FileExists(t, targetFile)
+
+		content, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Verify raw content without delimiters
+		assert.Equal(t, skillsContent, contentStr)
+		assert.NotContains(t, contentStr, RuleStart)
+		assert.NotContains(t, contentStr, RuleEnd)
+	})
+
+	t.Run("skips if content unchanged", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "snyk-rules", "SKILL.md")
+
+		// Write initial content
+		err := writeGlobalSkills(targetFile, skillsContent, logger)
+		require.NoError(t, err)
+
+		// Write same content again - should not error
+		err = writeGlobalSkills(targetFile, skillsContent, logger)
+		require.NoError(t, err)
+
+		// Verify content unchanged
+		content, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		assert.Equal(t, skillsContent, string(content))
+	})
+
+	t.Run("overwrites with new content", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "snyk-rules", "SKILL.md")
+
+		// Write initial content
+		err := writeGlobalSkills(targetFile, skillsContent, logger)
+		require.NoError(t, err)
+
+		// Write new content
+		newContent := "---\nname: snyk-rules\ndescription: Updated skill\n---\n\n# Updated Skills"
+		err = writeGlobalSkills(targetFile, newContent, logger)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		assert.Equal(t, newContent, string(content))
+	})
+
+	t.Run("creates nested directories", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "deep", "nested", "dir", "SKILL.md")
+
+		err := writeGlobalSkills(targetFile, skillsContent, logger)
+		require.NoError(t, err)
+
+		assert.FileExists(t, targetFile)
+	})
+}
+
+func TestRemoveGlobalSkills(t *testing.T) {
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+
+	t.Run("removes existing skills file", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "SKILL.md")
+
+		// Create the file
+		err := os.WriteFile(targetFile, []byte("# Skills"), 0644)
+		require.NoError(t, err)
+		assert.FileExists(t, targetFile)
+
+		// Remove it
+		err = removeGlobalSkills(targetFile, logger)
+		require.NoError(t, err)
+
+		// Verify file was removed
+		_, err = os.Stat(targetFile)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("handles non-existent file gracefully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetFile := filepath.Join(tempDir, "nonexistent.md")
+
+		err := removeGlobalSkills(targetFile, logger)
+		require.NoError(t, err)
 	})
 }
 
