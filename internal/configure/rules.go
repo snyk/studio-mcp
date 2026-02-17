@@ -89,6 +89,42 @@ func writeGlobalRules(targetFile, rulesContent string, logger *zerolog.Logger) e
 	return nil
 }
 
+// writeGlobalSkills writes skills to a global location as a raw file (no delimiters needed since the directory is unique to us)
+func writeGlobalSkills(targetFile, skillsContent string, logger *zerolog.Logger) error {
+	if err := os.MkdirAll(filepath.Dir(targetFile), 0755); err != nil {
+		return fmt.Errorf("failed to create skills directory: %w", err)
+	}
+
+	// Check if content is already up to date
+	existing, err := os.ReadFile(targetFile)
+	if err == nil && string(existing) == skillsContent {
+		logger.Debug().Msgf("Global skills already up to date at %s", targetFile)
+		return nil
+	}
+
+	if err := os.WriteFile(targetFile, []byte(skillsContent), 0644); err != nil {
+		return fmt.Errorf("failed to write global skills: %w", err)
+	}
+
+	logger.Debug().Msgf("Wrote global skills to %s", targetFile)
+	return nil
+}
+
+// removeGlobalSkills removes the global skills file
+func removeGlobalSkills(targetFile string, logger *zerolog.Logger) error {
+	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
+		logger.Debug().Msgf("Global skills file does not exist at %s, nothing to remove", targetFile)
+		return nil
+	}
+
+	if err := os.Remove(targetFile); err != nil {
+		return fmt.Errorf("failed to remove global skills: %w", err)
+	}
+
+	logger.Debug().Msgf("Removed global skills from %s", targetFile)
+	return nil
+}
+
 // removeGlobalRules removes the Snyk rules block from the global rules file
 func removeGlobalRules(targetFile string, logger *zerolog.Logger) error {
 	// Check if file exists

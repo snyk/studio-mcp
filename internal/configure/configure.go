@@ -17,6 +17,12 @@ var snykRulesAlwaysApply string
 //go:embed rules/sast/smart_apply.md
 var snykRulesSmartApply string
 
+//go:embed skills/sast/always_apply.md
+var snykSkillsAlwaysApply string
+
+//go:embed skills/sast/smart_apply.md
+var snykSkillsSmartApply string
+
 // Configure sets up MCP server and rules for the specified IDE host.
 func Configure(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, cliPath string) error {
 	hostName := config.GetString(shared.ToolNameParam)
@@ -59,8 +65,22 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 		}
 	}
 
-	// Remove global rules (only if configureRules is true)
+	// Remove rules/skills (only if configureRules is true)
 	if configureRules {
+		// Remove global skills (e.g. Cursor)
+		if ideConf.globalSkillsPath != "" {
+			_ = userInterface.Output(fmt.Sprintf("📋 Removing global skills from: %s", ideConf.globalSkillsPath))
+
+			err := removeGlobalSkills(ideConf.globalSkillsPath, logger)
+			if err != nil {
+				return fmt.Errorf("failed to remove global skills for %s: %w", ideConf.name, err)
+			}
+
+			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed global skills for %s", ideConf.name))
+			logger.Info().Msgf("Successfully removed global skills for %s from %s", ideConf.name, ideConf.globalSkillsPath)
+		}
+
+		// Remove global rules (e.g. Windsurf, Antigravity, gemini-cli, claude-cli)
 		if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Removing global rules from: %s", ideConf.globalRulesPath))
 
@@ -73,7 +93,7 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 			logger.Info().Msgf("Successfully removed global rules for %s from %s", ideConf.name, ideConf.globalRulesPath)
 		}
 
-		// Remove local rules (only if configureRules is true)
+		// Remove local rules (e.g. VS Code)
 		if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Removing local rules from workspace: %s", workspacePath))
 
@@ -84,6 +104,14 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed local rules for %s", ideConf.name))
 			logger.Info().Msgf("Successfully removed local rules for %s", ideConf.name)
+		}
+
+		// Clean up legacy local rules
+		if ideConf.legacyLocalRulesPath != "" && workspacePath != "" {
+			err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
+			if err != nil {
+				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
+			}
 		}
 	}
 
@@ -158,6 +186,28 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 			return fmt.Errorf("invalid rule type: %s. supported values are %s, %s", ruleType, shared.RuleTypeAlwaysApply, shared.RuleTypeSmart)
 		}
 
+		// Write global skills (e.g. Cursor)
+		if ideConf.globalSkillsPath != "" {
+			var skillsContent string
+			switch ruleType {
+			case shared.RuleTypeAlwaysApply:
+				skillsContent = snykSkillsAlwaysApply
+			case shared.RuleTypeSmart:
+				skillsContent = snykSkillsSmartApply
+			}
+
+			_ = userInterface.Output(fmt.Sprintf("📋 Writing global skills (%s) to: %s", ruleType, ideConf.globalSkillsPath))
+
+			err := writeGlobalSkills(ideConf.globalSkillsPath, skillsContent, logger)
+			if err != nil {
+				return fmt.Errorf("failed to write global skills for %s: %w", ideConf.name, err)
+			}
+
+			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote global skills for %s", ideConf.name))
+			logger.Info().Msgf("Successfully wrote global skills for %s at %s", ideConf.name, ideConf.globalSkillsPath)
+		}
+
+		// Write global rules with delimiters (e.g. Windsurf, Antigravity, gemini-cli, claude-cli)
 		if rulesScope == shared.RulesGlobalScope && ideConf.globalRulesPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing global rules (%s) to: %s", ruleType, ideConf.globalRulesPath))
 
@@ -170,6 +220,7 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 			logger.Info().Msgf("Successfully wrote global rules for %s at %s", ideConf.name, ideConf.globalRulesPath)
 		}
 
+		// Write local rules (e.g. VS Code)
 		if rulesScope == shared.RulesWorkspaceScope && ideConf.localRulesPath != "" && workspacePath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Writing local rules (%s) to workspace: %s", ruleType, workspacePath))
 
@@ -185,6 +236,14 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote local rules for %s", ideConf.name))
 			logger.Info().Msgf("Successfully wrote local rules for %s", ideConf.name)
+		}
+
+		// Clean up legacy local rules when migrating to global rules/skills
+		if ideConf.legacyLocalRulesPath != "" && workspacePath != "" {
+			err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
+			if err != nil {
+				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
+			}
 		}
 	}
 
