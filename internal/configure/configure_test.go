@@ -1119,7 +1119,7 @@ func TestRemoveDelimitedBlock(t *testing.T) {
 		{
 			name:     "removes block from middle",
 			source:   "before\n" + RuleStart + "\ncontent\n" + RuleEnd + "\nafter\n",
-			expected: "beforeafter\n",
+			expected: "before\nafter\n",
 		},
 		{
 			name:     "removes block from start",
