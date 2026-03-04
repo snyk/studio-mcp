@@ -14,7 +14,7 @@
     },
     {
       "name": "snyk_sca_scan",
-      "description": "WE NEED TO USE THE ABSOLUTE PATH IN THE PATH ARGUMENT. Analyzes projects for open-source vulnerabilities and license compliance issues by inspecting manifest files (e.g., package.json, pom.xml, requirements.txt) to understand dependencies and then queries the Snyk vulnerability database. \nWhen to use: During local development by developers on their workstations before committing changes for immediate feedback. \nHow to use: Test locally: run tool with at least the path parameter. \nPrerequisites: Project's package manager (e.g., Gradle, Maven, npm) must be installed for accurate dependency resolution.",
+      "description": "WE NEED TO USE THE ABSOLUTE PATH IN THE PATH ARGUMENT. Analyzes projects for open-source vulnerabilities and license compliance issues by inspecting manifest files (e.g., package.json, pom.xml, requirements.txt, uv.lock) to understand dependencies and then queries the Snyk vulnerability database. \nWhen to use: During local development by developers on their workstations before committing changes for immediate feedback. \nHow to use: Test locally: run tool with at least the path parameter. \nPrerequisites: Project's package manager (e.g., Gradle, Maven, npm) must be installed for accurate dependency resolution.",
       "command": [
         "test"
       ],
@@ -96,7 +96,7 @@
           "name": "file",
           "type": "string",
           "isRequired": false,
-          "description": "Specifies the path to a particular package manifest file (e.g., `package.json`, `pom.xml`, `requirements.txt`) that Snyk should inspect. If not provided, Snyk attempts auto-detection. Mutually exclusive with `all_projects`",
+          "description": "Specifies the path to a particular package manifest file (e.g., `package.json`, `pom.xml`, `requirements.txt`, `uv.lock`) that Snyk should inspect. If not provided, Snyk attempts auto-detection. Mutually exclusive with `all_projects`",
           "supersedesParams": [
             "all_projects"
           ]
@@ -105,7 +105,7 @@
           "name": "package_manager",
           "type": "string",
           "isRequired": false,
-          "description": "Specifies the package manager type when the `file` option points to a manifest file with a non-standard name (e.g., `req.txt` instead of `requirements.txt` for Python). Accepted values: `npm`, `maven`, `pip`, `yarn`, `gradle`, `composer`, `rubygems`, `nuget`, `golangdep`, `govendor`, `gomodules`. Default is auto-detected.",
+          "description": "Specifies the package manager type when the `file` option points to a manifest file with a non-standard name (e.g., `req.txt` instead of `requirements.txt` for Python). Accepted values: `npm`, `maven`, `pip`, `yarn`, `gradle`, `composer`, `rubygems`, `nuget`, `golangdep`, `govendor`, `gomodules`, `uv`. Default is auto-detected.",
           "supersedesParams": [
             "all_projects"
           ]
