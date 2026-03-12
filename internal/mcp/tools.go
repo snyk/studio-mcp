@@ -17,11 +17,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -113,6 +115,16 @@ type SnykMcpTools struct {
 	Tools []SnykMcpToolsDefinition `json:"tools"`
 }
 
+// snykCodeEnablementPrompted tracks org IDs that have been prompted for Snyk Code enablement.
+// This allows us to distinguish between first prompt and user-confirmed retry.
+var snykCodeEnablementPrompted = make(map[string]bool)
+
+// clearSnykCodeEnablementState resets the enablement tracking state.
+// This should be called when a new MCP session starts to ensure fresh state.
+func clearSnykCodeEnablementState() {
+	snykCodeEnablementPrompted = make(map[string]bool)
+}
+
 func loadMcpToolsFromJson() (*SnykMcpTools, error) {
 	var config SnykMcpTools
 	if err := json.Unmarshal([]byte(snykToolsJson), &config); err != nil {
@@ -123,6 +135,9 @@ func loadMcpToolsFromJson() (*SnykMcpTools, error) {
 }
 
 func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, profile Profile) error {
+	// Clear any stale enablement state from previous sessions
+	clearSnykCodeEnablementState()
+
 	config, err := loadMcpToolsFromJson()
 
 	if err != nil || config == nil {
@@ -186,9 +201,18 @@ func (m *McpLLMBinding) runSnyk(ctx context.Context, invocationCtx workflow.Invo
 	logger.Debug().Strs("args", command.Args).Str("workingDir", command.Dir).Msg("Running Command with")
 	logger.Trace().Strs("env", command.Env).Msg("Environment")
 
-	command.Stderr = logger
+	// Capture both stdout and stderr to detect error codes like snyk-code-0005
+	// which may be output to stderr by the CLI
+	var stderrBuf bytes.Buffer
+	command.Stderr = io.MultiWriter(logger, &stderrBuf)
 	res, err := command.Output()
 	resAsString := string(res)
+
+	// If stdout is empty but stderr has content, use stderr as the result
+	// This ensures error messages (like snyk-code-0005) are captured for processing
+	if resAsString == "" && stderrBuf.Len() > 0 {
+		resAsString = stderrBuf.String()
+	}
 
 	logger.Debug().Str("result", resAsString).Msg("Command run result")
 
@@ -309,7 +333,9 @@ func (m *McpLLMBinding) enhanceOutput(logger *zerolog.Logger, toolDef SnykMcpToo
 	return mapScanResponse(logger, toolDef, output, success, workDir, includeIgnores)
 }
 
-// tryAutoEnableSnykCodeAndRetry attempts to enable Snyk Code for an organization and retry the scan
+// tryAutoEnableSnykCodeAndRetry handles Snyk Code enablement with user confirmation.
+// On first encounter, it prompts the user for confirmation. On subsequent calls (after user confirms),
+// it attempts to enable Snyk Code and retry the scan.
 func (m *McpLLMBinding) tryAutoEnableSnykCodeAndRetry(ctx context.Context, invocationCtx workflow.InvocationContext, logger *zerolog.Logger, workingDir string, args []string, output string, toolDef SnykMcpToolsDefinition, includeIgnores bool) (string, bool) {
 	config := invocationCtx.GetEngine().GetConfiguration()
 	orgId := config.GetString(configuration.ORGANIZATION)
@@ -317,29 +343,58 @@ func (m *McpLLMBinding) tryAutoEnableSnykCodeAndRetry(ctx context.Context, invoc
 
 	// No organization ID - provide manual enablement instructions
 	if orgId == "" {
-		output += fmt.Sprintf("\nTo activate Snyk Code, visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
+		output += fmt.Sprintf("\n\nSnyk Code is not enabled for your organization.\nTo activate Snyk Code, visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
 		return output, false
 	}
 
-	// Try to enable Snyk Code for the organization
-	logger.Info().Str("orgId", orgId).Msg("Attempting to enable Snyk Code automatically")
-	output += "\n\nAttempting to enable Snyk Code automatically for organization: " + orgId
+	// Check if we've already prompted for this org - if so, user has confirmed and we should proceed
+	if !snykCodeEnablementPrompted[orgId] {
+		// First encounter - prompt user for confirmation
+		snykCodeEnablementPrompted[orgId] = true
+		logger.Info().Str("orgId", orgId).Msg("Snyk Code not enabled, prompting user for confirmation")
+
+		confirmationPrompt := fmt.Sprintf(`
+
+Snyk Code is not enabled for your organization.
+
+IMPORTANT: Ask the user: "Snyk Code is not enabled for your organization (%s). Would you like me to enable it so I can scan your code for security vulnerabilities?"
+
+If the user says YES:
+- Tell them you will enable Snyk Code and run the scan
+- Call snyk_code_scan again with the same path to proceed with enablement
+
+If the user says NO:
+- Inform them that Snyk Code scanning will not be available
+- They can enable it manually at: %s/manage/snyk-code?from=mcp, or disable the snyk_code_scan tool in their MCP server configuration`, orgId, appUrl)
+
+		output += confirmationPrompt
+		return output, false
+	}
+
+	// User has confirmed - proceed with enablement
+	logger.Info().Str("orgId", orgId).Msg("User confirmed, attempting to enable Snyk Code")
+	output += "\n\nAttempting to enable Snyk Code for organization: " + orgId
 
 	enableErr := m.enableSnykCodeForOrg(ctx, invocationCtx, orgId)
 	if enableErr != nil {
-		logger.Warn().Err(enableErr).Msg("Failed to enable Snyk Code automatically")
-		output += fmt.Sprintf("\n\nFailed to enable Snyk Code automatically: %s", enableErr.Error())
-		output += fmt.Sprintf("\nTo activate Snyk Code, visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
+		logger.Warn().Err(enableErr).Msg("Failed to enable Snyk Code")
+		// Clear the prompted state so user can try again if needed
+		delete(snykCodeEnablementPrompted, orgId)
+		output += fmt.Sprintf("\n\nFailed to enable Snyk Code: %s", enableErr.Error())
+		output += fmt.Sprintf("\nTo activate Snyk Code manually, visit %s/manage/snyk-code?from=mcp or ask your administrator.", appUrl)
 		return output, false
 	}
 
+	// Clear the prompted state after successful enablement
+	delete(snykCodeEnablementPrompted, orgId)
+
 	// Retry the scan
-	logger.Info().Msg("Snyk Code enabled successfully, automatically retrying scan")
-	output += "\n\nSnyk Code has been successfully enabled for your organization. Retrying scan automatically...\n\n"
+	logger.Info().Msg("Snyk Code enabled successfully, retrying scan")
+	output += "\n\nSnyk Code has been successfully enabled for your organization. Running scan...\n\n"
 
 	retryOutput, retryErr := m.runSnyk(ctx, invocationCtx, workingDir, args)
 	if retryErr != nil {
-		output += fmt.Sprintf("Retry failed: %s\n%s", retryErr.Error(), retryOutput)
+		output += fmt.Sprintf("Scan failed: %s\n%s", retryErr.Error(), retryOutput)
 		return output, false
 	}
 
