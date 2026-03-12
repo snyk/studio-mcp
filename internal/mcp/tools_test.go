@@ -342,7 +342,9 @@ func TestSnykCodeTestHandler(t *testing.T) {
 }
 
 func TestSnykCodeAutoEnablement(t *testing.T) {
-	// Test the automatic Snyk Code enablement feature when snyk-code-0005 error is encountered
+	// Test the two-phase Snyk Code enablement feature:
+	// Phase 1: First call returns a prompt asking user for confirmation
+	// Phase 2: Second call (after user confirms) enables Snyk Code and retries scan
 	fixture := setupTestFixture(t)
 	tmpDir := t.TempDir()
 
@@ -350,183 +352,255 @@ func TestSnykCodeAutoEnablement(t *testing.T) {
 	toolDef := getToolWithName(t, fixture.tools, ToolName.CodeTest)
 	require.NotNil(t, toolDef, "snyk_code_scan tool definition not found")
 
-	testCases := []struct {
-		name              string
-		mockCliScriptFunc func() string // Function that returns script content
-		orgId             string
-		apiToken          string
-		setupMockAPI      func() string // Returns mock API server URL
-		expectedError     bool
-		expectedInOutput  []string
-		notInOutput       []string
-	}{
-		{
-			name:              "Auto-enable succeeds and retry succeeds",
-			mockCliScriptFunc: mockCliScriptErrorThenSuccess,
-			orgId:             "test-org-123",
-			apiToken:          "test-token-456",
-			setupMockAPI: func() string {
-				// Create a mock API server that returns 200 OK
-				return createMockAPIServer(t, 201, map[string]interface{}{
-					"data": map[string]interface{}{
-						"type": "sast_settings",
-						"id":   "test-org-123",
-						"attributes": map[string]interface{}{
-							"sast_enabled": true,
-						},
-					},
-				})
-			},
-			expectedError: false,
-			expectedInOutput: []string{
-				"Attempting to enable Snyk Code automatically",
-				"Snyk Code has been successfully enabled",
-				"Retrying scan automatically",
-			},
-			notInOutput: []string{
-				"Failed to enable Snyk Code",
-			},
-		},
-		{
-			name: "Auto-enable fails with 403 - provides manual instructions",
-			mockCliScriptFunc: func() string {
-				return mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is disabled")
-			},
-			orgId:    "test-org-123",
-			apiToken: "test-token-456",
-			setupMockAPI: func() string {
-				return createMockAPIServer(t, 403, map[string]interface{}{
-					"errors": []interface{}{
-						map[string]interface{}{
-							"status": "403",
-							"detail": "Forbidden",
-						},
-					},
-				})
-			},
-			expectedError: true,
-			expectedInOutput: []string{
-				"snyk-code-0005",
-				"Attempting to enable Snyk Code automatically",
-				"Failed to enable Snyk Code automatically",
-				"API request failed with status 403",
-				"To activate Snyk Code",
-			},
-			notInOutput: []string{
-				"successfully enabled",
-				"Retrying scan",
-			},
-		},
-		{
-			name: "Auto-enable succeeds but retry also fails",
-			mockCliScriptFunc: func() string {
-				return mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled")
-			},
-			orgId:    "test-org-456",
-			apiToken: "test-token-789",
-			setupMockAPI: func() string {
-				return createMockAPIServer(t, 201, map[string]interface{}{
-					"data": map[string]interface{}{
-						"type": "sast_settings",
-						"id":   "test-org-456",
-						"attributes": map[string]interface{}{
-							"sast_enabled": true,
-						},
-					},
-				})
-			},
-			expectedError: true,
-			expectedInOutput: []string{
-				"Attempting to enable Snyk Code automatically",
-				"Snyk Code has been successfully enabled",
-				"Retrying scan automatically",
-				"Retry failed",
-				"snyk-code-0005",
-			},
-			notInOutput: []string{},
-		},
-		{
-			name: "Missing org ID - no auto-enable attempt",
-			mockCliScriptFunc: func() string {
-				return mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled")
-			},
-			orgId:         "",
-			apiToken:      "test-token",
-			setupMockAPI:  func() string { return "" },
-			expectedError: true,
-			expectedInOutput: []string{
-				"snyk-code-0005",
-				"To activate Snyk Code,",
-			},
-			notInOutput: []string{
-				"Attempting to enable Snyk Code automatically",
-			},
-		},
-	}
+	t.Run("First call prompts user for confirmation", func(t *testing.T) {
+		// Clear any previous state
+		delete(snykCodeEnablementPrompted, "test-org-prompt")
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			createMockSnykCliWithScript(t, fixture.snykCliPath, tc.mockCliScriptFunc())
+		createMockSnykCliWithScript(t, fixture.snykCliPath, mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled"))
 
-			config := fixture.invocationContext.GetConfiguration()
-			config.Set(configuration.ORGANIZATION, tc.orgId)
-			config.Set(configuration.AUTHENTICATION_TOKEN, tc.apiToken)
-			config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
+		config := fixture.invocationContext.GetConfiguration()
+		config.Set(configuration.ORGANIZATION, "test-org-prompt")
+		config.Set(configuration.AUTHENTICATION_TOKEN, "test-token")
+		config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
 
-			if tc.setupMockAPI != nil {
-				apiURL := tc.setupMockAPI()
-				if apiURL != "" {
-					config.Set(configuration.API_URL, apiURL)
-				}
-			}
+		handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
 
-			handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
-
-			requestObj := map[string]any{
-				"params": map[string]any{
-					"arguments": map[string]any{
-						"path": tmpDir,
-					},
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]any{
+					"path": tmpDir,
 				},
-			}
-			requestJSON, err := json.Marshal(requestObj)
-			require.NoError(t, err)
+			},
+		}
+		requestJSON, err := json.Marshal(requestObj)
+		require.NoError(t, err)
 
-			var request mcp.CallToolRequest
-			err = json.Unmarshal(requestJSON, &request)
-			require.NoError(t, err)
+		var request mcp.CallToolRequest
+		err = json.Unmarshal(requestJSON, &request)
+		require.NoError(t, err)
 
-			result, err := handler(context.Background(), request)
+		result, err := handler(context.Background(), request)
+		require.NoError(t, err)
 
-			var resultText string
-			if result != nil && len(result.Content) > 0 {
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				resultText = textContent.Text
-			}
-			if err != nil {
-				resultText += " " + err.Error()
-			}
+		var resultText string
+		if result != nil && len(result.Content) > 0 {
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			resultText = textContent.Text
+		}
 
-			// error expectation
-			if tc.expectedError {
-				require.True(t, err != nil || strings.Contains(resultText, "Error:"),
-					"Expected error but got none. Result: %s", resultText)
-			} else {
-				require.NoError(t, err, "Unexpected error: %v. Result: %s", err, resultText)
-			}
+		// Should return a prompt asking for confirmation
+		require.Contains(t, resultText, "IMPORTANT: Ask the user")
+		require.Contains(t, resultText, "Would you like me to enable it")
+		require.Contains(t, resultText, "If the user says YES")
+		require.Contains(t, resultText, "If the user says NO")
+		require.Contains(t, resultText, "disable the snyk_code_scan tool")
+		// Should NOT attempt enablement yet
+		require.NotContains(t, resultText, "Attempting to enable Snyk Code for organization")
+	})
 
-			// expected strings are present
-			for _, expected := range tc.expectedInOutput {
-				require.Contains(t, resultText, expected, "Expected output to contain: %s\nFull output: %s", expected, resultText)
-			}
+	t.Run("Second call enables Snyk Code and retries scan", func(t *testing.T) {
+		// Simulate that we already prompted for this org (user said yes and called again)
+		snykCodeEnablementPrompted["test-org-enable"] = true
 
-			// unwanted strings are not present
-			for _, notExpected := range tc.notInOutput {
-				require.NotContains(t, resultText, notExpected, "Expected output to NOT contain: %s\nFull output: %s", notExpected, resultText)
-			}
+		createMockSnykCliWithScript(t, fixture.snykCliPath, mockCliScriptErrorThenSuccess())
+
+		apiURL := createMockAPIServer(t, 201, map[string]interface{}{
+			"data": map[string]interface{}{
+				"type": "sast_settings",
+				"id":   "test-org-enable",
+				"attributes": map[string]interface{}{
+					"sast_enabled": true,
+				},
+			},
 		})
-	}
+
+		config := fixture.invocationContext.GetConfiguration()
+		config.Set(configuration.ORGANIZATION, "test-org-enable")
+		config.Set(configuration.AUTHENTICATION_TOKEN, "test-token")
+		config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
+		config.Set(configuration.API_URL, apiURL)
+
+		handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
+
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]any{
+					"path": tmpDir,
+				},
+			},
+		}
+		requestJSON, err := json.Marshal(requestObj)
+		require.NoError(t, err)
+
+		var request mcp.CallToolRequest
+		err = json.Unmarshal(requestJSON, &request)
+		require.NoError(t, err)
+
+		result, err := handler(context.Background(), request)
+		require.NoError(t, err)
+
+		var resultText string
+		if result != nil && len(result.Content) > 0 {
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			resultText = textContent.Text
+		}
+
+		// Should attempt enablement and retry
+		require.Contains(t, resultText, "Attempting to enable Snyk Code for organization")
+		require.Contains(t, resultText, "Snyk Code has been successfully enabled")
+		require.Contains(t, resultText, "Running scan")
+	})
+
+	t.Run("Enable fails with 403 - provides manual instructions", func(t *testing.T) {
+		// Simulate that we already prompted (user said yes and called again)
+		snykCodeEnablementPrompted["test-org-403"] = true
+
+		createMockSnykCliWithScript(t, fixture.snykCliPath, mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is disabled"))
+
+		apiURL := createMockAPIServer(t, 403, map[string]interface{}{
+			"errors": []interface{}{
+				map[string]interface{}{
+					"status": "403",
+					"detail": "Forbidden",
+				},
+			},
+		})
+
+		config := fixture.invocationContext.GetConfiguration()
+		config.Set(configuration.ORGANIZATION, "test-org-403")
+		config.Set(configuration.AUTHENTICATION_TOKEN, "test-token")
+		config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
+		config.Set(configuration.API_URL, apiURL)
+
+		handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
+
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]any{
+					"path": tmpDir,
+				},
+			},
+		}
+		requestJSON, err := json.Marshal(requestObj)
+		require.NoError(t, err)
+
+		var request mcp.CallToolRequest
+		err = json.Unmarshal(requestJSON, &request)
+		require.NoError(t, err)
+
+		result, err := handler(context.Background(), request)
+		require.NoError(t, err)
+
+		var resultText string
+		if result != nil && len(result.Content) > 0 {
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			resultText = textContent.Text
+		}
+
+		require.Contains(t, resultText, "snyk-code-0005")
+		require.Contains(t, resultText, "Attempting to enable Snyk Code for organization")
+		require.Contains(t, resultText, "Failed to enable Snyk Code")
+		require.Contains(t, resultText, "API request failed with status 403")
+		require.Contains(t, resultText, "To activate Snyk Code manually")
+	})
+
+	t.Run("Enable succeeds but retry also fails", func(t *testing.T) {
+		// Simulate that we already prompted (user said yes and called again)
+		snykCodeEnablementPrompted["test-org-retry-fail"] = true
+
+		createMockSnykCliWithScript(t, fixture.snykCliPath, mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled"))
+
+		apiURL := createMockAPIServer(t, 201, map[string]interface{}{
+			"data": map[string]interface{}{
+				"type": "sast_settings",
+				"id":   "test-org-retry-fail",
+				"attributes": map[string]interface{}{
+					"sast_enabled": true,
+				},
+			},
+		})
+
+		config := fixture.invocationContext.GetConfiguration()
+		config.Set(configuration.ORGANIZATION, "test-org-retry-fail")
+		config.Set(configuration.AUTHENTICATION_TOKEN, "test-token")
+		config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
+		config.Set(configuration.API_URL, apiURL)
+
+		handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
+
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]any{
+					"path": tmpDir,
+				},
+			},
+		}
+		requestJSON, err := json.Marshal(requestObj)
+		require.NoError(t, err)
+
+		var request mcp.CallToolRequest
+		err = json.Unmarshal(requestJSON, &request)
+		require.NoError(t, err)
+
+		result, err := handler(context.Background(), request)
+		require.NoError(t, err)
+
+		var resultText string
+		if result != nil && len(result.Content) > 0 {
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			resultText = textContent.Text
+		}
+
+		require.Contains(t, resultText, "Attempting to enable Snyk Code for organization")
+		require.Contains(t, resultText, "Snyk Code has been successfully enabled")
+		require.Contains(t, resultText, "Running scan")
+		require.Contains(t, resultText, "Scan failed")
+	})
+
+	t.Run("Missing org ID - provides manual instructions without prompting", func(t *testing.T) {
+		createMockSnykCliWithScript(t, fixture.snykCliPath, mockCliScriptAlwaysError("Error: snyk-code-0005: Snyk Code is not enabled"))
+
+		config := fixture.invocationContext.GetConfiguration()
+		config.Set(configuration.ORGANIZATION, "")
+		config.Set(configuration.AUTHENTICATION_TOKEN, "test-token")
+		config.Set(configuration.WEB_APP_URL, "https://app.snyk.io")
+
+		handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
+
+		requestObj := map[string]any{
+			"params": map[string]any{
+				"arguments": map[string]any{
+					"path": tmpDir,
+				},
+			},
+		}
+		requestJSON, err := json.Marshal(requestObj)
+		require.NoError(t, err)
+
+		var request mcp.CallToolRequest
+		err = json.Unmarshal(requestJSON, &request)
+		require.NoError(t, err)
+
+		result, err := handler(context.Background(), request)
+		require.NoError(t, err)
+
+		var resultText string
+		if result != nil && len(result.Content) > 0 {
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			resultText = textContent.Text
+		}
+
+		require.Contains(t, resultText, "snyk-code-0005")
+		require.Contains(t, resultText, "To activate Snyk Code")
+		// Should NOT attempt enablement or ask for confirmation when no org ID
+		require.NotContains(t, resultText, "IMPORTANT: Ask the user")
+		require.NotContains(t, resultText, "Attempting to enable Snyk Code for organization")
+	})
 }
 
 func TestBasicSnykCommands(t *testing.T) {
@@ -1146,7 +1220,8 @@ FLAG_FILE="/tmp/snyk_test_retry_$$"
 # First invocation returns error with exit code 2
 if [ ! -f "$FLAG_FILE" ]; then
   touch "$FLAG_FILE"
-  echo "Error: snyk-code-0005: Snyk Code is not enabled for organization"
+  # Output to stderr to match real CLI behavior
+  echo "Error: snyk-code-0005: Snyk Code is not enabled for organization" >&2
   exit 2
 fi
 
@@ -1159,8 +1234,9 @@ exit 0
 
 // mockCliScriptAlwaysError returns a bash script that always errors
 func mockCliScriptAlwaysError(errorMsg string) string {
+	// Output to stderr to match real CLI behavior
 	return fmt.Sprintf(`#!/bin/bash
-echo "%s"
+echo "%s" >&2
 exit 2
 `, errorMsg)
 }
