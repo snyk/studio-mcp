@@ -17,12 +17,9 @@ const (
 
 // writeLocalRules writes rules to a workspace-relative path
 func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logger *zerolog.Logger) error {
-	rulesPath := filepath.Join(workspacePath, relativeRulesPath)
-	if workspacePath != "" {
-		isPathSymlink, err := isSymlink(rulesPath)
-		if err == nil && isPathSymlink {
-			return fmt.Errorf("using symlinks for paths is not supported: %s", rulesPath)
-		}
+	rulesPath, err := resolveWorkspacePath(workspacePath, relativeRulesPath)
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
@@ -45,7 +42,10 @@ func writeLocalRules(workspacePath, relativeRulesPath, rulesContent string, logg
 
 // removeLocalRules removes the local rules file from the workspace
 func removeLocalRules(workspacePath, relativeRulesPath string, logger *zerolog.Logger) error {
-	rulesPath := filepath.Join(workspacePath, relativeRulesPath)
+	rulesPath, err := resolveWorkspacePath(workspacePath, relativeRulesPath)
+	if err != nil {
+		return err
+	}
 
 	// Check if file exists
 	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
@@ -261,7 +261,10 @@ func gitIgnoreLocalRulesFile(workspacePath string, relativeRulesPath string, log
 // resolveGitignorePath determines which .gitignore to use.
 // It first checks if a .gitignore exists in the workspace directory, otherwise falls back to git root.
 func resolveGitignorePath(gitRoot string, workspacePath string, logger *zerolog.Logger) (string, error) {
-	workspaceGitignore := filepath.Join(workspacePath, ".gitignore")
+	workspaceGitignore, err := resolveWorkspacePath(workspacePath, ".gitignore")
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(workspaceGitignore); err == nil {
 		logger.Debug().Msgf("Using workspace .gitignore at %s", workspaceGitignore)
 		return workspaceGitignore, nil
@@ -273,6 +276,30 @@ func resolveGitignorePath(gitRoot string, workspacePath string, logger *zerolog.
 		return gitignorePath, nil
 	}
 	return "", fmt.Errorf("no .gitignore found in workspace or git root")
+}
+
+func resolveWorkspacePath(workspacePath string, candidatePath string) (string, error) {
+	absWorkspacePath, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", fmt.Errorf("invalid workspace path %q: %w", workspacePath, err)
+	}
+
+	absCandidatePath := filepath.Join(absWorkspacePath, candidatePath)
+	isPathSymlink, err := isSymlink(absCandidatePath)
+	if err == nil && isPathSymlink {
+		return "", fmt.Errorf("using symlinks for paths is not supported: %q", candidatePath)
+	}
+
+	relCandidatePath, err := filepath.Rel(absWorkspacePath, absCandidatePath)
+	if err != nil {
+		return "", fmt.Errorf("invalid workspace path %q: %w", candidatePath, err)
+	}
+
+	if relCandidatePath == ".." || strings.HasPrefix(relCandidatePath, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("cannot use path outside workspace: %q", candidatePath)
+	}
+
+	return absCandidatePath, nil
 }
 
 func trimTrailingNewlines(s string) string {
