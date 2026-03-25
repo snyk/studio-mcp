@@ -1921,9 +1921,10 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_iac_scan",
 				"snyk_sbom_scan",
 				"snyk_aibom",
+				"snyk_package_health_check",
 			},
 			unexpectedTools: []string{
-				"snyk_package_health_check",
+				"",
 			},
 		},
 		{
@@ -2028,7 +2029,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom":
+			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom", "snyk_package_health_check":
 				// These should be in full but not lite
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
@@ -2037,7 +2038,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_package_health_check":
+			case "":
 				// These should be experimental only
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)

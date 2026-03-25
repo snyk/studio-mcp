@@ -179,7 +179,7 @@ func TestIsToolInProfile(t *testing.T) {
 		{"snyk_aibom", false, true, true},
 
 		// Tools in experimental only
-		{"snyk_package_health_check", false, false, true},
+		{"snyk_package_health_check", false, true, true},
 	}
 
 	// Load actual tools from JSON
