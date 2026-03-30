@@ -36,3 +36,8 @@ Running `snyk_sca_scan` may execute third-party ecosystem tools (for example, Gr
 For more details, see the [Snyk MCP installation, configuration and startup](https://docs.snyk.io/integrations/snyk-studio-agentic-integrations/quickstart-guides-for-snyk-studio) and [Troubleshooting for the Snyk MCP server](https://docs.snyk.io/integrations/snyk-studio-agentic-integrations/troubleshooting) pages.
 
 **This repository is closed to public contributions.**
+
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/snyk-studio-mcp).
+
