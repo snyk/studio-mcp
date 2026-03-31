@@ -1,6 +1,6 @@
 module github.com/snyk/studio-mcp
 
-go 1.26.1
+go 1.25.7
 
 tool (
 	github.com/golang/mock/mockgen

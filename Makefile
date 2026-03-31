@@ -28,7 +28,7 @@ LDFLAGS_DEV := "-X 'github.com/snyk/studio-mcp/application/config.Development=tr
 
 TOOLS_BIN := $(shell pwd)/.bin
 
-OVERRIDE_GOCI_LINT_V := v2.11.4
+OVERRIDE_GOCI_LINT_V := v2.6.1
 GOLICENSES_V := v1.6.0
 PACT_V := 2.4.2
 
