@@ -177,9 +177,9 @@ func TestIsToolInProfile(t *testing.T) {
 		{"snyk_iac_scan", false, true, true},
 		{"snyk_sbom_scan", false, true, true},
 		{"snyk_aibom", false, true, true},
+		{"snyk_package_health_check", false, true, true},
 
-		// Tools in experimental only
-		{"snyk_package_health_check", false, false, true},
+		// Tools in experimental only -- none as of 3/31/2026
 	}
 
 	// Load actual tools from JSON
