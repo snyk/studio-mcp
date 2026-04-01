@@ -179,7 +179,8 @@ func TestIsToolInProfile(t *testing.T) {
 		{"snyk_aibom", false, true, true},
 		{"snyk_package_health_check", false, true, true},
 
-		// Tools in experimental only -- none as of 3/31/2026
+		// Tools in experimental only
+		{"snyk_secret_scan", false, false, true},
 	}
 
 	// Load actual tools from JSON
