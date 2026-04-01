@@ -571,7 +571,6 @@
         "test"
       ],
       "ignoreTrust": true,
-      "standardParams": ["sarif"],
       "profiles": ["experimental"],
       "annotations": {
         "readOnlyHint": true,
