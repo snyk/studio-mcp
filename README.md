@@ -22,6 +22,7 @@ In environments or applications that use MCP, you can use the `snyk mcp` CLI com
 * `snyk_iac_scan` (IaC scan)
 * `snyk_container_scan` (Container scan)
 * `snyk_sbom_scan` (SBOM file scan)
+* `snyk_secret_scan` (Secret detection scan - experimental)
 * `snyk_aibom` (Create AIBOM)
 * `snyk_package_health_check` (Package health and security assessment)
 * `snyk_trust` (Trust a given folder before running a scan)

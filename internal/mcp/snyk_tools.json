@@ -564,6 +564,54 @@
       ]
     },
     {
+      "name": "snyk_secret_scan",
+      "description": "Scans a project's source code and configuration files to detect hardcoded secrets such as API keys, tokens, passwords, and other sensitive credentials.\nWhen to use: During local development to ensure no secrets are accidentally committed to source control, or after generating new configuration files.\nHow to use: Run snyk_secret_scan with the path parameter pointing to the project directory.\nPrerequisites: Requires authentication with Snyk and the secrets feature enabled for your organization.",
+      "command": [
+        "secrets",
+        "test"
+      ],
+      "ignoreTrust": true,
+      "standardParams": ["sarif"],
+      "profiles": ["experimental"],
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "isRequired": true,
+          "description": "Positional argument for the *absolute path* to a directory to scan for secrets. The path MUST be absolute and have the correct path separator. You can retrieve the absolute path by invoking `pwd` on the command line in the working directory. Example: `/a/my-project` on linux/macOS or, on Windows `C:\\a\\my-project`.",
+          "isPositional": true
+        },
+        {
+          "name": "org",
+          "type": "string",
+          "isRequired": false,
+          "description": "Specifies the Snyk Organization ID (or slug name) under which the test results should be associated. Default is from `snyk config` or Snyk account."
+        },
+        {
+          "name": "severity_threshold",
+          "type": "string",
+          "isRequired": false,
+          "description": "Reports only findings that meet or exceed the specified severity level. Accepted values: `low`, `medium`, `high`, `critical`."
+        },
+        {
+          "name": "include_ignores",
+          "type": "boolean",
+          "isRequired": false,
+          "description": "Include previously ignored findings in the output."
+        },
+        {
+          "name": "exclude",
+          "type": "string",
+          "isRequired": false,
+          "description": "Comma-separated list of file or directory names to exclude from the secret scan. Patterns use basename matching and cannot contain path separators. Example: `node_modules,config.json`."
+        }
+      ]
+    },
+    {
       "name": "snyk_version",
       "description": "Displays the installed Snyk MCP version. \nWhen to use: To verify current CLI version for compatibility checks or when reporting issues.",
       "command": [
