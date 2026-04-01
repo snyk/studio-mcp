@@ -10,6 +10,10 @@
       "ignoreAuth": true,
       "standardParams": [],
       "profiles": ["full","lite", "experimental"],
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      },
       "params": []
     },
     {
@@ -24,6 +28,10 @@
       ],
       "profiles": ["full","lite", "experimental"],
       "outputMapper": "ScaOutputMapper",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "path",
@@ -252,6 +260,10 @@
       "outputMapper": "CodeOutputMapper",
       "standardParams": ["sarif"],
       "profiles": ["full","lite", "experimental"],
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "path",
@@ -296,6 +308,10 @@
       "ignoreTrust": true,
       "standardParams": [],
       "profiles": ["full", "experimental"],
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "image",
@@ -394,6 +410,10 @@
       "ignoreTrust": true,
       "standardParams": [],
       "profiles": ["full", "experimental"],
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "path",
@@ -512,6 +532,10 @@
       ],
       "profiles": ["full", "experimental"],
       "ignoreTrust": true,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "file",
@@ -549,6 +573,10 @@
       "ignoreAuth": true,
       "standardParams": [],
       "profiles": ["full","lite", "experimental"],
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": []
     },
     {
@@ -559,6 +587,10 @@
       "ignoreAuth": true,
       "standardParams": [],
       "profiles": ["full","lite", "experimental"],
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      },
       "params": []
     },
     {
@@ -571,6 +603,10 @@
         "experimental"
       ],
       "profiles": ["full", "experimental"],
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "path",
@@ -593,6 +629,10 @@
       "standardParams": [],
       "profiles": ["full","lite","experimental"],
       "ignoreTrust": true,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "path",
@@ -610,6 +650,10 @@
       "standardParams": [],
       "profiles": ["full","lite","experimental"],
       "ignoreTrust": true,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "preventedIssuesCount",
@@ -638,6 +682,10 @@
       "standardParams": [],
       "profiles": ["full","experimental"],
       "ignoreTrust": true,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false
+      },
       "params": [
         {
           "name": "package_name",

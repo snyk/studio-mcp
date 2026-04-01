@@ -79,6 +79,11 @@ var ToolName = struct {
 	PackageHealth: "snyk_package_health_check",
 }
 
+type SnykMcpToolAnnotations struct {
+	ReadOnlyHint    *bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+}
+
 type SnykMcpToolsDefinition struct {
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description"`
@@ -88,6 +93,7 @@ type SnykMcpToolsDefinition struct {
 	IgnoreTrust    bool                   `json:"ignoreTrust"`
 	IgnoreAuth     bool                   `json:"ignoreAuth"`
 	OutputMapper   string                 `json:"outputMapper"`
+	Annotations    SnykMcpToolAnnotations `json:"annotations"`
 	Params         []SnykMcpToolParameter `json:"params"`
 }
 
