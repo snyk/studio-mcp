@@ -309,6 +309,36 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		assert.Equal(t, "/other/cli", config.McpServers["OtherServer"].Command)
 	})
 
+	t.Run("does not overwrite SnykAlphaPatch when ensuring Snyk", func(t *testing.T) {
+		isolatedPath := filepath.Join(t.TempDir(), "mcp.json")
+		alphaPatch := McpServer{
+			Command: "npx",
+			Args:    []string{"-y", "@example/alphapatch-mcp"},
+			Env:     shared.McpEnvMap{"ALPHA": "keep"},
+		}
+		cfg := McpConfig{
+			McpServers: map[string]McpServer{
+				"SnykAlphaPatch": alphaPatch,
+			},
+		}
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(isolatedPath, data, 0644))
+
+		err = ensureMcpServerInJson(isolatedPath, "Snyk", "/path/to/cli", []string{"mcp", "-t", "stdio"}, env, logger)
+		require.NoError(t, err)
+
+		out, err := os.ReadFile(isolatedPath)
+		require.NoError(t, err)
+		var parsed McpConfig
+		require.NoError(t, json.Unmarshal(out, &parsed))
+
+		assert.Equal(t, alphaPatch, parsed.McpServers["SnykAlphaPatch"], "SnykAlphaPatch entry must not be replaced by stdio Snyk MCP")
+		require.Contains(t, parsed.McpServers, "Snyk")
+		assert.Equal(t, "/path/to/cli", parsed.McpServers["Snyk"].Command)
+		assert.Equal(t, []string{"mcp", "-t", "stdio"}, parsed.McpServers["Snyk"].Args)
+	})
+
 	t.Run("preserves other root-level JSON fields", func(t *testing.T) {
 		// Create a config file with additional root-level fields
 		configWithOtherFields := map[string]interface{}{
