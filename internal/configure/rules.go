@@ -168,11 +168,14 @@ func removeDelimitedBlock(source, start, end string) string {
 	}
 
 	// Remove from start marker to end marker (inclusive of the end marker)
-	before := src[:startIdx]
-	after := src[endIdx+len(end):]
+	before := trimTrailingNewlines(src[:startIdx])
+	after := trimLeadingNewlines(src[endIdx+len(end):])
 
-	// Clean up extra newlines
-	result := trimTrailingNewlines(before) + trimLeadingNewlines(after)
+	separator := ""
+	if before != "" && after != "" {
+		separator = "\n"
+	}
+	result := before + separator + after
 
 	// Ensure single trailing newline if there's content
 	if len(strings.TrimSpace(result)) > 0 {
