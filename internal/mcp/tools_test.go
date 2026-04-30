@@ -715,6 +715,46 @@ func TestGetSnykToolsConfig(t *testing.T) {
 	}
 }
 
+// TestSnykToolsJSONToolAnnotations ensures snyk_tools.json advertises
+// mimimum recommended MCP tool annotations.
+func TestSnykToolsJSONToolAnnotations(t *testing.T) {
+	var root struct {
+		Tools []json.RawMessage `json:"tools"`
+	}
+	err := json.Unmarshal([]byte(snykToolsJson), &root)
+	require.NoError(t, err, "embedded snyk_tools.json must be valid JSON")
+
+	requiredKeys := []string{
+		"readOnlyHint",
+		"destructiveHint",
+		"openWorldHint",
+		"idempotentHint",
+	}
+
+	for i, rawTool := range root.Tools {
+		var tool struct {
+			Name        string          `json:"name"`
+			Annotations json.RawMessage `json:"annotations"`
+		}
+		err = json.Unmarshal(rawTool, &tool)
+		require.NoError(t, err, "tool index %d", i)
+		require.NotEmpty(t, tool.Name, "tool index %d must have name", i)
+		require.NotEmpty(t, tool.Annotations, "tool %q must have a non-empty annotations object", tool.Name)
+
+		var ann map[string]json.RawMessage
+		err = json.Unmarshal(tool.Annotations, &ann)
+		require.NoError(t, err, "tool %q annotations must be a JSON object", tool.Name)
+
+		for _, key := range requiredKeys {
+			rawVal, ok := ann[key]
+			require.True(t, ok, "tool %q must include annotation %q", tool.Name, key)
+			var b bool
+			err = json.Unmarshal(rawVal, &b)
+			require.NoError(t, err, "tool %q annotation %q must be a JSON boolean", tool.Name, key)
+		}
+	}
+}
+
 func TestCreateToolFromDefinition(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -810,6 +850,26 @@ func TestCreateToolFromDefinition(t *testing.T) {
 			require.Equal(t, tc.expectedName, tool.Name)
 		})
 	}
+}
+
+func TestCreateToolFromDefinition_IncludesAllAnnotationHints(t *testing.T) {
+	readOnly, destructive, openWorld, idempotent := true, false, true, false
+	tool := createToolFromDefinition(&SnykMcpToolsDefinition{
+		Name:        "annotated_tool",
+		Description: "test",
+		Command:     []string{"test"},
+		Annotations: SnykMcpToolAnnotations{
+			ReadOnlyHint:    &readOnly,
+			DestructiveHint: &destructive,
+			OpenWorldHint:   &openWorld,
+			IdempotentHint:  &idempotent,
+		},
+	})
+
+	require.Equal(t, &readOnly, tool.Annotations.ReadOnlyHint)
+	require.Equal(t, &destructive, tool.Annotations.DestructiveHint)
+	require.Equal(t, &openWorld, tool.Annotations.OpenWorldHint)
+	require.Equal(t, &idempotent, tool.Annotations.IdempotentHint)
 }
 
 func TestExtractParamsFromRequest(t *testing.T) {

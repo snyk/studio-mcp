@@ -10,7 +10,7 @@
       "ignoreAuth": true,
       "standardParams": [],
       "profiles": ["full","lite", "experimental"],
-      "annotations": {        
+      "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": true,
@@ -721,7 +721,9 @@
       "ignoreTrust": true,
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {
@@ -753,7 +755,9 @@
       "ignoreTrust": true,
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {
