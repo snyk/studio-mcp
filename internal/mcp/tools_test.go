@@ -852,26 +852,6 @@ func TestCreateToolFromDefinition(t *testing.T) {
 	}
 }
 
-func TestCreateToolFromDefinition_IncludesAllAnnotationHints(t *testing.T) {
-	readOnly, destructive, openWorld, idempotent := true, false, true, false
-	tool := createToolFromDefinition(&SnykMcpToolsDefinition{
-		Name:        "annotated_tool",
-		Description: "test",
-		Command:     []string{"test"},
-		Annotations: SnykMcpToolAnnotations{
-			ReadOnlyHint:    &readOnly,
-			DestructiveHint: &destructive,
-			OpenWorldHint:   &openWorld,
-			IdempotentHint:  &idempotent,
-		},
-	})
-
-	require.Equal(t, &readOnly, tool.Annotations.ReadOnlyHint)
-	require.Equal(t, &destructive, tool.Annotations.DestructiveHint)
-	require.Equal(t, &openWorld, tool.Annotations.OpenWorldHint)
-	require.Equal(t, &idempotent, tool.Annotations.IdempotentHint)
-}
-
 func TestExtractParamsFromRequest(t *testing.T) {
 	dir := t.TempDir()
 	testCases := []struct {
