@@ -12,7 +12,9 @@
       "profiles": ["full","lite", "experimental"],
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": true
       },
       "params": []
     },
@@ -30,7 +32,9 @@
       "outputMapper": "ScaOutputMapper",
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {
@@ -262,7 +266,9 @@
       "profiles": ["full","lite", "experimental"],
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": true
       },
       "params": [
         {
@@ -310,7 +316,9 @@
       "profiles": ["full", "experimental"],
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {
@@ -412,7 +420,9 @@
       "profiles": ["full", "experimental"],
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": true
       },
       "params": [
         {
@@ -534,7 +544,9 @@
       "ignoreTrust": true,
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {
@@ -574,7 +586,9 @@
       "profiles": ["experimental"],
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": true
       },
       "params": [
         {
@@ -622,7 +636,9 @@
       "profiles": ["full","lite", "experimental"],
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "idempotentHint": true
       },
       "params": []
     },
@@ -636,7 +652,9 @@
       "profiles": ["full","lite", "experimental"],
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": []
     },
@@ -652,7 +670,9 @@
       "profiles": ["full", "experimental"],
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": true
       },
       "params": [
         {
@@ -678,7 +698,9 @@
       "ignoreTrust": true,
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "idempotentHint": true
       },
       "params": [
         {
@@ -699,7 +721,9 @@
       "ignoreTrust": true,
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {
@@ -731,7 +755,9 @@
       "ignoreTrust": true,
       "annotations": {
         "readOnlyHint": true,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": false
       },
       "params": [
         {

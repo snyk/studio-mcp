@@ -113,6 +113,8 @@ func createToolFromDefinition(toolDef *SnykMcpToolsDefinition) mcp.Tool {
 	opts = append(opts, mcp.WithToolAnnotation(mcp.ToolAnnotation{
 		ReadOnlyHint:    toolDef.Annotations.ReadOnlyHint,
 		DestructiveHint: toolDef.Annotations.DestructiveHint,
+		IdempotentHint:  toolDef.Annotations.IdempotentHint,
+		OpenWorldHint:   toolDef.Annotations.OpenWorldHint,
 	}))
 
 	return mcp.NewTool(toolDef.Name, opts...)
