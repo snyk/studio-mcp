@@ -1,6 +1,7 @@
 version: 2.1
 
 orbs:
+  go: snyk/go@1.0.0
   prodsec: snyk/prodsec-orb@1
 
 commands:
