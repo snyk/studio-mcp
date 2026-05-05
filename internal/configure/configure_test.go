@@ -1251,6 +1251,64 @@ func TestRemoveDelimitedBlock(t *testing.T) {
 	}
 }
 
+// TestRemoveDelimitedBlock_LineAnchored_PreservesUserQuotedMarkers is a
+// regression for the security finding that prior first-occurrence matching
+// could destroy user content. Pre-fix: a CLAUDE.md that quoted the literal
+// marker text inline (e.g. in a how-to doc) before the real Snyk block
+// would have everything between the user's quote and Snyk's real end
+// marker silently deleted. Post-fix (line-anchored matching): the inline
+// quote does not match (markers must be on their own line), so user
+// content above the real block survives intact.
+func TestRemoveDelimitedBlock_LineAnchored_PreservesUserQuotedMarkers(t *testing.T) {
+	t.Run("user quotes marker inline in a sentence above real block", func(t *testing.T) {
+		userPreamble := "# How Snyk migration works\n\n" +
+			"Snyk wraps its rules with `" + RuleStart + "` and `" + RuleEnd + "` markers.\n" +
+			"Cleanup of legacy installs strips that delimited block.\n\n"
+		realBlock := RuleStart + "\n# Snyk Security At Inception\nReal content.\n" + RuleEnd + "\n"
+		userTrailer := "\n# More notes\nAfter the block.\n"
+
+		source := userPreamble + realBlock + userTrailer
+		result := removeDelimitedBlock(source, RuleStart, RuleEnd)
+
+		// User prose around the real block survives intact.
+		assert.Contains(t, result, "# How Snyk migration works")
+		assert.Contains(t, result, "Cleanup of legacy installs strips")
+		assert.Contains(t, result, "# More notes")
+		assert.Contains(t, result, "After the block.")
+
+		// The quoted marker tokens INSIDE the user's sentence are preserved
+		// (they're user-authored prose, not Snyk's actual delimiters).
+		assert.Contains(t, result, "Snyk wraps its rules with `"+RuleStart+"`")
+
+		// Real block content is gone.
+		assert.NotContains(t, result, "Real content.")
+		// AND no orphan Snyk block markers should remain on their own line.
+		// (We can't simply NotContains the marker tokens — they survive in
+		// the user's quoted prose. Verify line-anchored absence instead.)
+		for _, line := range strings.Split(result, "\n") {
+			assert.NotEqual(t, RuleStart, line, "no orphan RuleStart line should remain")
+			assert.NotEqual(t, RuleEnd, line, "no orphan RuleEnd line should remain")
+		}
+	})
+
+	t.Run("user has marker on its own line AFTER real block — last-start-with-matching-end picks the real one", func(t *testing.T) {
+		realBlock := RuleStart + "\n# Real Snyk\nReal content.\n" + RuleEnd
+		// User pasted the start marker on its own line below, e.g. in a code
+		// block they were writing. There's no matching end after it, so the
+		// real block above is the only complete pair.
+		userBelow := "\n\n```\n" + RuleStart + "\n```\n\nMy notes.\n"
+
+		source := realBlock + userBelow
+		result := removeDelimitedBlock(source, RuleStart, RuleEnd)
+
+		// Real block stripped.
+		assert.NotContains(t, result, "Real content.")
+		// Orphan user-pasted marker survives (it's inside a fenced code block).
+		assert.Contains(t, result, "```\n"+RuleStart+"\n```")
+		assert.Contains(t, result, "My notes.")
+	})
+}
+
 // TestConfigure_ClaudeCliEndToEnd exercises the full add → remove cycle for
 // the claude-cli host. It pins three behaviors that helper-level tests do
 // NOT cover: that addConfiguration writes the new dedicated rules file,
