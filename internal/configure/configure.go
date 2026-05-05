@@ -113,6 +113,17 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
 			}
 		}
+
+		// Clean up legacy global rules block left behind by a prior install that
+		// injected delimited rules into a shared file (e.g. claude-cli installs
+		// before the move to ~/.claude/rules/). removeGlobalRules is idempotent —
+		// no-op when the delimited block is absent — so this is safe regardless.
+		if ideConf.legacyGlobalRulesPath != "" {
+			err := removeGlobalRules(ideConf.legacyGlobalRulesPath, logger)
+			if err != nil {
+				logger.Warn().Err(err).Msgf("Unable to clean up legacy global rules at %s", ideConf.legacyGlobalRulesPath)
+			}
+		}
 	}
 
 	_ = userInterface.Output("\n🎉 Removal complete!")
@@ -243,6 +254,17 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 			err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
 			if err != nil {
 				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
+			}
+		}
+
+		// Clean up legacy global rules block when migrating to a dedicated rules
+		// file (e.g. claude-cli moved from delimited block in ~/.claude/CLAUDE.md
+		// to ~/.claude/rules/snyk-security.md). removeGlobalRules only strips the
+		// delimited block, leaving any user content in the legacy file intact.
+		if ideConf.legacyGlobalRulesPath != "" {
+			err := removeGlobalRules(ideConf.legacyGlobalRulesPath, logger)
+			if err != nil {
+				logger.Warn().Err(err).Msgf("Unable to clean up legacy global rules at %s", ideConf.legacyGlobalRulesPath)
 			}
 		}
 	}

@@ -52,15 +52,16 @@ func TestGetHostConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name                       string
-		hostName                   string
-		expectError                bool
-		expectedName               string
-		expectMcpGlobalConfig      bool
-		expectLocalRulesPath       bool
-		expectGlobalRulesPath      bool
-		expectGlobalSkillsPath     bool
-		expectLegacyLocalRulesPath bool
+		name                        string
+		hostName                    string
+		expectError                 bool
+		expectedName                string
+		expectMcpGlobalConfig       bool
+		expectLocalRulesPath        bool
+		expectGlobalRulesPath       bool
+		expectGlobalSkillsPath      bool
+		expectLegacyLocalRulesPath  bool
+		expectLegacyGlobalRulesPath bool
 	}{
 		{
 			name:                   "cursor",
@@ -113,12 +114,13 @@ func TestGetHostConfig(t *testing.T) {
 			expectGlobalRulesPath: true,
 		},
 		{
-			name:                  "claude-cli",
-			hostName:              "claude-cli",
-			expectError:           false,
-			expectedName:          "claude-cli",
-			expectMcpGlobalConfig: true,
-			expectGlobalRulesPath: true,
+			name:                        "claude-cli",
+			hostName:                    "claude-cli",
+			expectError:                 false,
+			expectedName:                "claude-cli",
+			expectMcpGlobalConfig:       true,
+			expectGlobalSkillsPath:      true,
+			expectLegacyGlobalRulesPath: true,
 		},
 		{
 			name:        "unsupported",
@@ -155,8 +157,68 @@ func TestGetHostConfig(t *testing.T) {
 			if tt.expectLegacyLocalRulesPath {
 				assert.NotEmpty(t, config.legacyLocalRulesPath)
 			}
+			if tt.expectLegacyGlobalRulesPath {
+				assert.NotEmpty(t, config.legacyGlobalRulesPath)
+				assert.Contains(t, config.legacyGlobalRulesPath, homeDir)
+			}
 		})
 	}
+}
+
+func TestGetHostConfig_ClaudeCliPaths(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	config, err := getHostConfig("claude-cli")
+	require.NoError(t, err)
+
+	// MCP server entry continues to live in ~/.claude.json
+	assert.Equal(t, filepath.Join(homeDir, ".claude.json"), config.mcpGlobalConfigPath)
+
+	// Rules now live in a dedicated, auto-loaded file under ~/.claude/rules/
+	// (per https://code.claude.com/docs/en/memory#user-level-rules) instead of
+	// being injected into the user's global ~/.claude/CLAUDE.md.
+	assert.Equal(t, filepath.Join(homeDir, ".claude", "rules", "snyk-security.md"), config.globalSkillsPath)
+
+	// CLAUDE.md is preserved as a legacy path so prior installs get cleaned up.
+	assert.Equal(t, filepath.Join(homeDir, ".claude", "CLAUDE.md"), config.legacyGlobalRulesPath)
+
+	// Delimited globalRulesPath is no longer used for claude-cli — the rules
+	// file is now Snyk-owned and should be written without delimiters.
+	assert.Empty(t, config.globalRulesPath)
+
+	// claude-cli has never used local workspace rules.
+	assert.Empty(t, config.localRulesPath)
+	assert.Empty(t, config.legacyLocalRulesPath)
+}
+
+func TestRemoveGlobalRulesIsClaudeCliMigrationSafe(t *testing.T) {
+	// Verifies the migration path: a CLAUDE.md containing both pre-existing user
+	// content AND a Snyk delimited block (left by an older install) gets the
+	// Snyk block stripped while user content is preserved verbatim. This is the
+	// behavior addConfiguration / removeConfiguration rely on for claude-cli.
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+
+	tempDir := t.TempDir()
+	claudeMd := filepath.Join(tempDir, "CLAUDE.md")
+
+	userContent := "# My personal preferences\n\n- Use tabs for indentation\n- Prefer Go over Rust\n"
+	snykBlock := RuleStart + "\n# Snyk Security At Inception\nDo the snyk thing.\n" + RuleEnd
+	combined := userContent + "\n" + snykBlock + "\n"
+	require.NoError(t, os.WriteFile(claudeMd, []byte(combined), 0644))
+
+	require.NoError(t, removeGlobalRules(claudeMd, logger))
+
+	result, err := os.ReadFile(claudeMd)
+	require.NoError(t, err)
+	resultStr := string(result)
+
+	assert.Contains(t, resultStr, "Use tabs for indentation")
+	assert.Contains(t, resultStr, "Prefer Go over Rust")
+	assert.NotContains(t, resultStr, RuleStart)
+	assert.NotContains(t, resultStr, RuleEnd)
+	assert.NotContains(t, resultStr, "Snyk Security At Inception")
 }
 
 func TestGetHostConfig_VSCodePaths(t *testing.T) {
