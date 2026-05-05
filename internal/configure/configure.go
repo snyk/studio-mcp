@@ -23,6 +23,16 @@ var snykSkillsAlwaysApply string
 //go:embed skills/sast/smart_apply.md
 var snykSkillsSmartApply string
 
+// Claude Code's user-level rules loader (~/.claude/rules/*.md) does not use
+// the Cursor SKILL.md frontmatter (name/description); these are clean
+// markdown bodies tailored for that loader.
+//
+//go:embed rules/claude/always_apply.md
+var snykClaudeRulesAlwaysApply string
+
+//go:embed rules/claude/smart_apply.md
+var snykClaudeRulesSmartApply string
+
 // Configure sets up MCP server and rules for the specified IDE host.
 func Configure(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, cliPath string) error {
 	hostName := config.GetString(shared.ToolNameParam)
@@ -78,6 +88,19 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed global skills for %s", ideConf.name))
 			logger.Info().Msgf("Successfully removed global skills for %s from %s", ideConf.name, ideConf.globalSkillsPath)
+		}
+
+		// Remove dedicated rules file (e.g. claude-cli)
+		if ideConf.globalDedicatedRulesPath != "" {
+			_ = userInterface.Output(fmt.Sprintf("📋 Removing dedicated rules file from: %s", ideConf.globalDedicatedRulesPath))
+
+			err := removeGlobalSkills(ideConf.globalDedicatedRulesPath, logger)
+			if err != nil {
+				return fmt.Errorf("failed to remove dedicated rules file for %s: %w", ideConf.name, err)
+			}
+
+			_ = userInterface.Output(fmt.Sprintf("✅ Successfully removed dedicated rules file for %s", ideConf.name))
+			logger.Info().Msgf("Successfully removed dedicated rules file for %s from %s", ideConf.name, ideConf.globalDedicatedRulesPath)
 		}
 
 		// Remove global rules (e.g. Windsurf, Antigravity, gemini-cli, claude-cli)
@@ -216,6 +239,27 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 
 			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote global skills for %s", ideConf.name))
 			logger.Info().Msgf("Successfully wrote global skills for %s at %s", ideConf.name, ideConf.globalSkillsPath)
+		}
+
+		// Write dedicated rules file (e.g. claude-cli ~/.claude/rules/snyk-security.md)
+		if ideConf.globalDedicatedRulesPath != "" {
+			var dedicatedRulesContent string
+			switch ruleType {
+			case shared.RuleTypeAlwaysApply:
+				dedicatedRulesContent = snykClaudeRulesAlwaysApply
+			case shared.RuleTypeSmart:
+				dedicatedRulesContent = snykClaudeRulesSmartApply
+			}
+
+			_ = userInterface.Output(fmt.Sprintf("📋 Writing dedicated rules file (%s) to: %s", ruleType, ideConf.globalDedicatedRulesPath))
+
+			err := writeGlobalSkills(ideConf.globalDedicatedRulesPath, dedicatedRulesContent, logger)
+			if err != nil {
+				return fmt.Errorf("failed to write dedicated rules file for %s: %w", ideConf.name, err)
+			}
+
+			_ = userInterface.Output(fmt.Sprintf("✅ Successfully wrote dedicated rules file for %s", ideConf.name))
+			logger.Info().Msgf("Successfully wrote dedicated rules file for %s at %s", ideConf.name, ideConf.globalDedicatedRulesPath)
 		}
 
 		// Write global rules with delimiters (e.g. Windsurf, Antigravity, gemini-cli, claude-cli)

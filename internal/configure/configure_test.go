@@ -52,16 +52,17 @@ func TestGetHostConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name                        string
-		hostName                    string
-		expectError                 bool
-		expectedName                string
-		expectMcpGlobalConfig       bool
-		expectLocalRulesPath        bool
-		expectGlobalRulesPath       bool
-		expectGlobalSkillsPath      bool
-		expectLegacyLocalRulesPath  bool
-		expectLegacyGlobalRulesPath bool
+		name                           string
+		hostName                       string
+		expectError                    bool
+		expectedName                   string
+		expectMcpGlobalConfig          bool
+		expectLocalRulesPath           bool
+		expectGlobalRulesPath          bool
+		expectGlobalSkillsPath         bool
+		expectGlobalDedicatedRulesPath bool
+		expectLegacyLocalRulesPath     bool
+		expectLegacyGlobalRulesPath    bool
 	}{
 		{
 			name:                   "cursor",
@@ -114,13 +115,13 @@ func TestGetHostConfig(t *testing.T) {
 			expectGlobalRulesPath: true,
 		},
 		{
-			name:                        "claude-cli",
-			hostName:                    "claude-cli",
-			expectError:                 false,
-			expectedName:                "claude-cli",
-			expectMcpGlobalConfig:       true,
-			expectGlobalSkillsPath:      true,
-			expectLegacyGlobalRulesPath: true,
+			name:                           "claude-cli",
+			hostName:                       "claude-cli",
+			expectError:                    false,
+			expectedName:                   "claude-cli",
+			expectMcpGlobalConfig:          true,
+			expectGlobalDedicatedRulesPath: true,
+			expectLegacyGlobalRulesPath:    true,
 		},
 		{
 			name:        "unsupported",
@@ -154,6 +155,10 @@ func TestGetHostConfig(t *testing.T) {
 				assert.NotEmpty(t, config.globalSkillsPath)
 				assert.Contains(t, config.globalSkillsPath, homeDir)
 			}
+			if tt.expectGlobalDedicatedRulesPath {
+				assert.NotEmpty(t, config.globalDedicatedRulesPath)
+				assert.Contains(t, config.globalDedicatedRulesPath, homeDir)
+			}
 			if tt.expectLegacyLocalRulesPath {
 				assert.NotEmpty(t, config.legacyLocalRulesPath)
 			}
@@ -175,10 +180,10 @@ func TestGetHostConfig_ClaudeCliPaths(t *testing.T) {
 	// MCP server entry continues to live in ~/.claude.json
 	assert.Equal(t, filepath.Join(homeDir, ".claude.json"), config.mcpGlobalConfigPath)
 
-	// Rules now live in a dedicated, auto-loaded file under ~/.claude/rules/
-	// (per https://code.claude.com/docs/en/memory#user-level-rules) instead of
-	// being injected into the user's global ~/.claude/CLAUDE.md.
-	assert.Equal(t, filepath.Join(homeDir, ".claude", "rules", "snyk-security.md"), config.globalSkillsPath)
+	// Rules live in a dedicated, auto-loaded file under ~/.claude/rules/
+	// (per https://code.claude.com/docs/en/memory#user-level-rules) — distinct
+	// from globalSkillsPath, which is reserved for Cursor's SKILL.md slot.
+	assert.Equal(t, filepath.Join(homeDir, ".claude", "rules", "snyk-security.md"), config.globalDedicatedRulesPath)
 
 	// CLAUDE.md is preserved as a legacy path so prior installs get cleaned up.
 	assert.Equal(t, filepath.Join(homeDir, ".claude", "CLAUDE.md"), config.legacyGlobalRulesPath)
@@ -186,6 +191,10 @@ func TestGetHostConfig_ClaudeCliPaths(t *testing.T) {
 	// Delimited globalRulesPath is no longer used for claude-cli — the rules
 	// file is now Snyk-owned and should be written without delimiters.
 	assert.Empty(t, config.globalRulesPath)
+
+	// globalSkillsPath is the Cursor-specific SKILL.md slot; claude-cli must
+	// not piggyback on it (we use the dedicated rules path instead).
+	assert.Empty(t, config.globalSkillsPath)
 
 	// claude-cli has never used local workspace rules.
 	assert.Empty(t, config.localRulesPath)
