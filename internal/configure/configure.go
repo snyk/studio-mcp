@@ -129,30 +129,15 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 			logger.Info().Msgf("Successfully removed local rules for %s", ideConf.name)
 		}
 
-		// Clean up legacy local rules
-		if ideConf.legacyLocalRulesPath != "" && workspacePath != "" {
-			err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
-			if err != nil {
-				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
-			}
-		}
+		cleanupLegacyLocalRules(logger, workspacePath, ideConf)
 	}
 
-	// Clean up legacy global rules block left behind by a prior install that
-	// injected delimited rules into a shared file (e.g. claude-cli installs
-	// before the move to ~/.claude/rules/). This runs OUTSIDE the
-	// configureRules gate intentionally: a user invoking remove with
-	// configureRules=false (e.g. wanting to remove only the MCP entry) still
-	// expects stale Snyk content in their personal CLAUDE.md to be cleaned up
-	// — migration housekeeping is independent of whether rules are being
-	// configured this run. removeGlobalRules is idempotent (no-op when the
-	// delimited block is absent), so this is safe regardless.
-	if ideConf.legacyGlobalRulesPath != "" {
-		err := removeGlobalRules(ideConf.legacyGlobalRulesPath, logger)
-		if err != nil {
-			logger.Warn().Err(err).Msgf("Unable to clean up legacy global rules at %s", ideConf.legacyGlobalRulesPath)
-		}
-	}
+	// Migration housekeeping runs OUTSIDE the configureRules gate: a user
+	// invoking remove with configureRules=false (e.g. wanting to remove only
+	// the MCP entry) still expects stale Snyk content in their personal
+	// CLAUDE.md to be cleaned up — migration is independent of whether rules
+	// are configured this run.
+	cleanupLegacyGlobalRules(logger, userInterface, ideConf)
 
 	_ = userInterface.Output("\n🎉 Removal complete!")
 	_ = userInterface.Output("\nNext steps:")
@@ -298,30 +283,15 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 			logger.Info().Msgf("Successfully wrote local rules for %s", ideConf.name)
 		}
 
-		// Clean up legacy local rules when migrating to global rules/skills
-		if ideConf.legacyLocalRulesPath != "" && workspacePath != "" {
-			err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
-			if err != nil {
-				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
-			}
-		}
+		cleanupLegacyLocalRules(logger, workspacePath, ideConf)
 	}
 
-	// Clean up legacy global rules block when migrating to a dedicated rules
-	// file (e.g. claude-cli moved from delimited block in ~/.claude/CLAUDE.md
-	// to ~/.claude/rules/snyk-security.md). This runs OUTSIDE the
-	// configureRules gate intentionally: a user running configure with
+	// Migration housekeeping runs OUTSIDE the configureRules gate (see
+	// cleanupLegacyGlobalRules): a user running configure with
 	// configureRules=false (MCP-only) has still abandoned the legacy
 	// location, so the stale block in their personal CLAUDE.md should be
 	// cleaned up regardless of whether rules are being configured this run.
-	// removeGlobalRules only strips the delimited block, leaving any user
-	// content in the legacy file intact.
-	if ideConf.legacyGlobalRulesPath != "" {
-		err := removeGlobalRules(ideConf.legacyGlobalRulesPath, logger)
-		if err != nil {
-			logger.Warn().Err(err).Msgf("Unable to clean up legacy global rules at %s", ideConf.legacyGlobalRulesPath)
-		}
-	}
+	cleanupLegacyGlobalRules(logger, userInterface, ideConf)
 
 	_ = userInterface.Output("\n🎉 Configuration complete!")
 	_ = userInterface.Output("\nNext steps:")
@@ -329,6 +299,42 @@ func addConfiguration(logger *zerolog.Logger, config configuration.Configuration
 	_ = userInterface.Output("  2. The Snyk MCP server will be available for AI-powered security scanning")
 
 	return nil
+}
+
+// cleanupLegacyLocalRules removes a workspace-relative legacy rules file
+// left behind by an older install (e.g. .cursor/rules/snyk_rules.mdc from
+// before the move to global skills). Best-effort: errors are logged at warn
+// level and execution continues. Quiet by design — local-rules cleanup
+// piggybacks on the rules-write call site and doesn't warrant its own user
+// breadcrumb.
+func cleanupLegacyLocalRules(logger *zerolog.Logger, workspacePath string, ideConf *hostConfig) {
+	if ideConf.legacyLocalRulesPath == "" || workspacePath == "" {
+		return
+	}
+	err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
+	if err != nil {
+		logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
+	}
+}
+
+// cleanupLegacyGlobalRules strips a Snyk delimited block left behind in a
+// legacy shared file (e.g. ~/.claude/CLAUDE.md from claude-cli installs
+// before the move to ~/.claude/rules/). Mutating a user-owned file is the
+// kind of thing the user should see in the CLI output, so this helper
+// announces the cleanup before running and surfaces any failure with a
+// concrete pointer back to the legacy file. removeGlobalRules is
+// idempotent (no-op when the delimited block is absent), so calling this
+// on every configure/remove run is safe.
+func cleanupLegacyGlobalRules(logger *zerolog.Logger, userInterface ui.UserInterface, ideConf *hostConfig) {
+	if ideConf.legacyGlobalRulesPath == "" {
+		return
+	}
+	_ = userInterface.Output(fmt.Sprintf("📋 Cleaning up legacy global rules block in: %s", ideConf.legacyGlobalRulesPath))
+	err := removeGlobalRules(ideConf.legacyGlobalRulesPath, logger)
+	if err != nil {
+		logger.Warn().Err(err).Msgf("Unable to clean up legacy global rules at %s", ideConf.legacyGlobalRulesPath)
+		_ = userInterface.Output(fmt.Sprintf("⚠️  Failed to clean up legacy global rules at %s — please inspect this file manually for the Snyk delimited block.", ideConf.legacyGlobalRulesPath))
+	}
 }
 
 // determineCommand returns the command and args based on execution context
