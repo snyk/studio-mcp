@@ -154,22 +154,54 @@ func removeGlobalRules(targetFile string, logger *zerolog.Logger) error {
 	return nil
 }
 
-// removeDelimitedBlock removes a delimited block from the content
+// findDelimitedBlockLines locates a delimited block in a normalized source
+// using line-anchored matching: both markers must appear on their own line
+// (no surrounding text on the same line), which matches what
+// writeGlobalRules / writeGlobalSkills emit. This avoids destroying user
+// content that quotes the marker text inline (e.g. in a how-to doc) and
+// is robust against multiple complete blocks: scanning from the end
+// returns the LAST start that has a matching end after it.
+//
+// Returns the (startLine, endLine) zero-based line indices, or (-1, -1)
+// when no complete delimited pair is found.
+func findDelimitedBlockLines(lines []string, start, end string) (int, int) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i] != start {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			if lines[j] == end {
+				return i, j
+			}
+		}
+	}
+	return -1, -1
+}
+
+// removeDelimitedBlock removes a delimited block from the content. Matching
+// is line-anchored (see findDelimitedBlockLines); a user's CLAUDE.md that
+// quotes the literal marker text inline within a sentence is preserved.
 func removeDelimitedBlock(source, start, end string) string {
 	// Normalize newlines to \n
 	src := strings.ReplaceAll(source, "\r\n", "\n")
+	lines := strings.Split(src, "\n")
 
-	startIdx := strings.Index(src, start)
-	endIdx := strings.Index(src, end)
-
-	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
-		// No block found
+	startLine, endLine := findDelimitedBlockLines(lines, start, end)
+	if startLine == -1 {
+		// No complete delimited pair found; leave source untouched. This
+		// returns the ORIGINAL source (not normalized) so a CRLF file with
+		// no Snyk block survives byte-for-byte.
 		return source
 	}
 
-	// Remove from start marker to end marker (inclusive of the end marker)
-	before := trimTrailingNewlines(src[:startIdx])
-	after := trimLeadingNewlines(src[endIdx+len(end):])
+	before := strings.Join(lines[:startLine], "\n")
+	after := ""
+	if endLine+1 < len(lines) {
+		after = strings.Join(lines[endLine+1:], "\n")
+	}
+
+	before = trimTrailingNewlines(before)
+	after = trimLeadingNewlines(after)
 
 	separator := ""
 	if before != "" && after != "" {
@@ -185,18 +217,22 @@ func removeDelimitedBlock(source, start, end string) string {
 	return result
 }
 
-// upsertDelimitedBlock replaces or appends a delimited block inside a file content
+// upsertDelimitedBlock replaces or appends a delimited block inside a file
+// content. Matching is line-anchored and uses the same robust pair-finding
+// rule as removeDelimitedBlock — see findDelimitedBlockLines.
 func upsertDelimitedBlock(source, start, end, fullBlockToInsert string) string {
 	// Normalize newlines to \n
 	src := strings.ReplaceAll(source, "\r\n", "\n")
+	lines := strings.Split(src, "\n")
 
-	startIdx := strings.Index(src, start)
-	endIdx := strings.Index(src, end)
-
-	if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
-		// Replace from start marker to end marker (inclusive)
-		before := src[:startIdx]
-		after := src[endIdx+len(end):]
+	startLine, endLine := findDelimitedBlockLines(lines, start, end)
+	if startLine != -1 {
+		// Replace from startLine to endLine (inclusive)
+		before := strings.Join(lines[:startLine], "\n")
+		after := ""
+		if endLine+1 < len(lines) {
+			after = strings.Join(lines[endLine+1:], "\n")
+		}
 		return trimTrailingNewlines(before) + "\n" + strings.TrimSpace(fullBlockToInsert) + "\n" + trimLeadingNewlines(after)
 	}
 

@@ -8,12 +8,14 @@ import (
 )
 
 type hostConfig struct {
-	name                 string
-	mcpGlobalConfigPath  string // Path to MCP server configuration JSON
-	localRulesPath       string // Relative path for local workspace rules
-	globalRulesPath      string // Absolute path for global user rules (delimited)
-	globalSkillsPath     string // Absolute path for global user skills (no delimiters)
-	legacyLocalRulesPath string // Old local rules path to clean up during migration
+	name                     string
+	mcpGlobalConfigPath      string // Path to MCP server configuration JSON
+	localRulesPath           string // Relative path for local workspace rules
+	globalRulesPath          string // Absolute path for global user rules (delimited block in a shared file)
+	globalSkillsPath         string // Absolute path for a host-native skill file (e.g. Cursor SKILL.md, no delimiters)
+	globalDedicatedRulesPath string // Absolute path for a dedicated host-native rules file (e.g. Claude Code ~/.claude/rules/*.md, no delimiters)
+	legacyLocalRulesPath     string // Old local rules path to clean up during migration (whole file removed)
+	legacyGlobalRulesPath    string // Old global rules file to clean up during migration (delimited block removed in place; surrounding user content preserved)
 }
 
 // getHostConfig returns MCP-Host-specific configuration based on the host name
@@ -69,10 +71,20 @@ func getHostConfig(hostName string) (*hostConfig, error) {
 			globalRulesPath:     filepath.Join(homeDir, ".gemini", "GEMINI.md"),
 		}, nil
 	case "claude-cli":
+		// Claude Code auto-loads any *.md file in ~/.claude/rules/ on every session
+		// (see https://code.claude.com/docs/en/memory#user-level-rules), so the rules
+		// belong in their own dedicated file rather than injected into the user's
+		// global ~/.claude/CLAUDE.md. globalDedicatedRulesPath is distinct from
+		// globalSkillsPath (Cursor's SKILL.md slot) so each host gets content
+		// formatted for its own loader — Claude Code rules need no frontmatter,
+		// while Cursor's SKILL.md expects name/description keys.
+		// legacyGlobalRulesPath cleans up the old in-place injection from prior
+		// installs that wrote a delimited block into ~/.claude/CLAUDE.md.
 		return &hostConfig{
-			name:                hostName,
-			mcpGlobalConfigPath: filepath.Join(homeDir, ".claude.json"),
-			globalRulesPath:     filepath.Join(homeDir, ".claude", "CLAUDE.md"),
+			name:                     hostName,
+			mcpGlobalConfigPath:      filepath.Join(homeDir, ".claude.json"),
+			globalDedicatedRulesPath: filepath.Join(homeDir, ".claude", "rules", "snyk-security.md"),
+			legacyGlobalRulesPath:    filepath.Join(homeDir, ".claude", "CLAUDE.md"),
 		}, nil
 	}
 	return nil, fmt.Errorf("unsupported Tool: %s", hostName)
