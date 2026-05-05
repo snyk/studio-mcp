@@ -5,15 +5,29 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/rs/zerolog"
+	"github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/go-application-framework/pkg/ui"
 	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// noopUserInterface satisfies ui.UserInterface for tests; every method
+// discards. configure.go only calls Output(), but the interface contract
+// requires the rest, so each method returns a benign zero value.
+type noopUserInterface struct{}
+
+func (noopUserInterface) Output(string) error                                 { return nil }
+func (noopUserInterface) OutputError(error, ...ui.Opts) error                 { return nil }
+func (noopUserInterface) NewProgressBar() ui.ProgressBar                      { return nil }
+func (noopUserInterface) Input(string) (string, error)                        { return "", nil }
+func (noopUserInterface) SelectOptions(string, []string) (int, string, error) { return 0, "", nil }
 
 func TestUpsertDelimitedBlock(t *testing.T) {
 	tests := []struct {
@@ -1235,4 +1249,177 @@ func TestRemoveDelimitedBlock(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestConfigure_ClaudeCliEndToEnd exercises the full add → remove cycle for
+// the claude-cli host. It pins three behaviors that helper-level tests do
+// NOT cover: that addConfiguration writes the new dedicated rules file,
+// that the new file is removed by removeConfiguration, and that the
+// migration cleanup wired into configure.go actually strips the legacy
+// delimited block from a pre-existing CLAUDE.md while preserving
+// surrounding user content. A future refactor that drops the migration
+// call sites would slip past every other test in this package — this is
+// the one that catches it.
+func TestConfigure_ClaudeCliEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// os.UserHomeDir() resolves via USERPROFILE on Windows; t.Setenv("HOME",...)
+		// would not redirect it. The migration logic is platform-agnostic, so we
+		// rely on Linux/macOS for this integration test.
+		t.Skip("integration test relies on $HOME-driven UserHomeDir resolution")
+	}
+
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+	uiStub := noopUserInterface{}
+
+	// Construct a fresh, isolated HOME for each subtest. addConfiguration and
+	// removeConfiguration both call os.UserHomeDir() via getHostConfig, which
+	// on Linux/macOS reads $HOME — t.Setenv lets us redirect those reads
+	// without touching the developer's actual ~/.claude tree.
+	setupTempHome := func(t *testing.T) string {
+		t.Helper()
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0755))
+		return home
+	}
+
+	// makeConfig returns a configuration.Configuration populated with the
+	// minimum keys Configure() reads. ruleType always-apply is the default
+	// payload Snyk ships; configureMcp+configureRules both true exercises
+	// the full add path.
+	makeConfig := func(removeMode bool) configuration.Configuration {
+		c := configuration.New()
+		c.Set(shared.ToolNameParam, "claude-cli")
+		c.Set(shared.RemoveParam, removeMode)
+		c.Set(shared.RuleTypeParam, shared.RuleTypeAlwaysApply)
+		c.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
+		c.Set(shared.WorkspacePathParam, "")
+		c.Set(shared.ConfigureMcpParam, true)
+		c.Set(shared.ConfigureRulesParam, true)
+		return c
+	}
+
+	t.Run("add: writes dedicated rules file and strips legacy CLAUDE.md block", func(t *testing.T) {
+		home := setupTempHome(t)
+
+		// Pre-seed CLAUDE.md with the exact shape a prior install would have
+		// left behind: user content above and below a delimited Snyk block.
+		// Migration must remove ONLY the block.
+		userTop := "# My personal preferences\n\n- Always tabs, never spaces\n"
+		userBottom := "\n## Personal projects\n\n- Be terse\n"
+		legacyBlock := RuleStart + "\n# Snyk Security At Inception\nDo the snyk thing.\n" + RuleEnd
+		claudeMd := filepath.Join(home, ".claude", "CLAUDE.md")
+		require.NoError(t, os.WriteFile(claudeMd, []byte(userTop+legacyBlock+userBottom), 0644))
+
+		require.NoError(t, Configure(logger, makeConfig(false), uiStub, "/usr/local/bin/snyk"))
+
+		// New dedicated rules file exists with the embedded Claude-Code rules
+		// content (no Cursor SKILL frontmatter).
+		rulesFile := filepath.Join(home, ".claude", "rules", "snyk-security.md")
+		assert.FileExists(t, rulesFile)
+		got, err := os.ReadFile(rulesFile)
+		require.NoError(t, err)
+		assert.Equal(t, snykClaudeRulesAlwaysApply, string(got),
+			"new rules file should contain the Claude-Code-shaped content embed")
+		assert.NotContains(t, string(got), "name: snyk-rules",
+			"Cursor SKILL frontmatter must not appear in the Claude rules file")
+
+		// Legacy block is gone but user content survives.
+		md, err := os.ReadFile(claudeMd)
+		require.NoError(t, err)
+		mds := string(md)
+		assert.NotContains(t, mds, RuleStart, "legacy block start marker should be stripped")
+		assert.NotContains(t, mds, RuleEnd, "legacy block end marker should be stripped")
+		assert.NotContains(t, mds, "Do the snyk thing", "legacy Snyk content body should be stripped")
+		assert.Contains(t, mds, "Always tabs, never spaces", "user content above the legacy block must survive")
+		assert.Contains(t, mds, "Be terse", "user content below the legacy block must survive")
+
+		// MCP server entry was written to ~/.claude.json.
+		claudeJSON := filepath.Join(home, ".claude.json")
+		assert.FileExists(t, claudeJSON)
+		jsonBytes, err := os.ReadFile(claudeJSON)
+		require.NoError(t, err)
+		var parsed McpConfig
+		require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+		assert.Contains(t, parsed.McpServers, shared.ServerNameKey,
+			"~/.claude.json should contain the Snyk MCP server entry")
+	})
+
+	t.Run("remove: deletes dedicated rules file and strips legacy CLAUDE.md block", func(t *testing.T) {
+		home := setupTempHome(t)
+
+		// Pre-create both the new rules file (as if a prior add had run) AND a
+		// CLAUDE.md still carrying the legacy block. removeConfiguration must
+		// take care of both.
+		rulesFile := filepath.Join(home, ".claude", "rules", "snyk-security.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(rulesFile), 0755))
+		require.NoError(t, os.WriteFile(rulesFile, []byte(snykClaudeRulesAlwaysApply), 0644))
+
+		userContent := "# Personal\n\n- A\n- B\n"
+		legacyBlock := RuleStart + "\n# Old Snyk\nOld.\n" + RuleEnd + "\n"
+		claudeMd := filepath.Join(home, ".claude", "CLAUDE.md")
+		require.NoError(t, os.WriteFile(claudeMd, []byte(userContent+legacyBlock), 0644))
+
+		// Pre-seed an MCP server entry so removeConfiguration has something to
+		// strip.
+		claudeJSON := filepath.Join(home, ".claude.json")
+		seed := []byte(`{"mcpServers":{"Snyk":{"command":"/x","args":["mcp","-t","stdio"],"env":{}}}}`)
+		require.NoError(t, os.WriteFile(claudeJSON, seed, 0644))
+
+		require.NoError(t, Configure(logger, makeConfig(true), uiStub, "/usr/local/bin/snyk"))
+
+		// Dedicated rules file is gone.
+		_, statErr := os.Stat(rulesFile)
+		assert.True(t, os.IsNotExist(statErr), "dedicated rules file should be removed")
+
+		// Legacy block stripped, user content preserved.
+		md, err := os.ReadFile(claudeMd)
+		require.NoError(t, err)
+		assert.NotContains(t, string(md), RuleStart)
+		assert.NotContains(t, string(md), "Old Snyk")
+		assert.Contains(t, string(md), "# Personal")
+
+		// MCP entry removed from ~/.claude.json.
+		jsonBytes, err := os.ReadFile(claudeJSON)
+		require.NoError(t, err)
+		var parsed McpConfig
+		require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+		assert.NotContains(t, parsed.McpServers, shared.ServerNameKey)
+	})
+
+	t.Run("MCP-only configure (configureRules=false) still runs legacy cleanup", func(t *testing.T) {
+		// Pins F12: migration housekeeping must run regardless of whether the
+		// user is configuring rules this invocation. A user running
+		// `--configure-rules=false --configure-mcp=true` who previously
+		// installed the delimited variant should still get their CLAUDE.md
+		// cleaned up.
+		home := setupTempHome(t)
+
+		userContent := "# Personal\n"
+		legacyBlock := RuleStart + "\n# stale snyk\n" + RuleEnd + "\n"
+		claudeMd := filepath.Join(home, ".claude", "CLAUDE.md")
+		require.NoError(t, os.WriteFile(claudeMd, []byte(userContent+legacyBlock), 0644))
+
+		c := configuration.New()
+		c.Set(shared.ToolNameParam, "claude-cli")
+		c.Set(shared.RemoveParam, false)
+		c.Set(shared.RuleTypeParam, shared.RuleTypeAlwaysApply)
+		c.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
+		c.Set(shared.WorkspacePathParam, "")
+		c.Set(shared.ConfigureMcpParam, true)
+		c.Set(shared.ConfigureRulesParam, false) // <- the gate the legacy cleanup must NOT respect
+		require.NoError(t, Configure(logger, c, uiStub, "/usr/local/bin/snyk"))
+
+		// Dedicated rules file should NOT have been written (configureRules=false).
+		_, statErr := os.Stat(filepath.Join(home, ".claude", "rules", "snyk-security.md"))
+		assert.True(t, os.IsNotExist(statErr), "rules file must not be written when configureRules=false")
+
+		// But the legacy block in CLAUDE.md MUST still be cleaned up.
+		md, err := os.ReadFile(claudeMd)
+		require.NoError(t, err)
+		assert.NotContains(t, string(md), RuleStart, "legacy cleanup must run even when configureRules=false")
+		assert.NotContains(t, string(md), "stale snyk")
+		assert.Contains(t, string(md), "# Personal")
+	})
 }
