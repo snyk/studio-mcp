@@ -185,12 +185,12 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 	return nil
 }
 
-// findServerKeyInGenericMap finds the matching server key in a generic map (case-insensitive)
+// findServerKeyInGenericMap finds the matching server key in a generic map (case-insensitive exact match only).
+// Substring matching was removed: ids like "SnykAlphaPatch" contain "snyk" but must not be treated as the managed "Snyk" slot.
 func findServerKeyInGenericMap(servers map[string]interface{}, serverKey string) string {
 	serverKeyLower := strings.ToLower(serverKey)
 	for key := range servers {
-		keyLower := strings.ToLower(key)
-		if keyLower == serverKeyLower || strings.Contains(keyLower, serverKeyLower) {
+		if strings.ToLower(key) == serverKeyLower {
 			return key
 		}
 	}
