@@ -219,10 +219,11 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 func findServerByCommandAndArgs(servers map[string]interface{}, command string, args []string) string {
 	for key, serverRaw := range servers {
 		if serverMap, ok := serverRaw.(map[string]interface{}); ok {
-			if cmdVal, ok := serverMap["command"].(string); ok {
-				if cmdVal == command {
-					if argsVal, ok := serverMap["args"].([]interface{}); ok {
-						if argsMatch(argsVal, args) {
+			if argsVal, ok := serverMap["args"].([]interface{}); ok {
+				if argsMatch(argsVal, args) {
+					if cmdVal, ok := serverMap["command"].(string); ok {
+						// For update operations, check if command contains the MCP server command identifier
+						if strings.Contains(strings.ToLower(cmdVal), strings.ToLower(shared.McpServerCommand)) {
 							return key
 						}
 					}
