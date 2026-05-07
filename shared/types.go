@@ -16,6 +16,12 @@ const (
 
 	RulesGlobalScope    = "global"
 	RulesWorkspaceScope = "workspace"
+
+	// MCP server configuration
+	McpServerCommand   = "snyk"
+	McpServerStdioArg1 = "mcp"
+	McpServerStdioArg2 = "-t"
+	McpServerStdioArg3 = "stdio"
 )
 
 const (
