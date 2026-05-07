@@ -16,7 +16,7 @@ tags:
   - name: Breakability
     description: Breakability analysis
 paths:
-  /orgs/{org_id}/breakability:
+  /breakability:
     post:
       summary: Breakability Analysis
       description: Generate a breakability assessment for one or more package upgrades
@@ -36,12 +36,6 @@ paths:
             entitlements:
               - api
       parameters:
-        - name: org_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
         - $ref: '#/components/parameters/Version'
       requestBody:
         required: true

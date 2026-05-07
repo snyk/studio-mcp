@@ -70,6 +70,7 @@ var ToolName = struct {
 	Trust         string
 	SendFeedback  string
 	PackageHealth string
+	Breakability  string
 }{
 	ScaTest:       "snyk_sca_scan",
 	CodeTest:      "snyk_code_scan",
@@ -79,6 +80,7 @@ var ToolName = struct {
 	Trust:         "snyk_trust",
 	SendFeedback:  "snyk_send_feedback",
 	PackageHealth: "snyk_package_health_check",
+	Breakability:  "snyk_breakability_check",
 }
 
 type SnykMcpToolAnnotations struct {
@@ -176,6 +178,8 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, p
 			m.mcpServer.AddTool(tool, m.snykAuthHandler(invocationCtx, toolDef))
 		case ToolName.PackageHealth:
 			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
+		case ToolName.Breakability:
+			m.mcpServer.AddTool(tool, m.snykBreakabilityHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
 		}
@@ -708,12 +712,12 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 			return mcp.NewToolResultText("Error: Organization ID not configured. Please set an organization using 'snyk config set org=<org-id>'"), nil
 		}
 
-		orgId, err := uuid.Parse(orgIdStr)
+		//orgId, err := uuid.Parse(orgIdStr)
 		if err != nil {
 			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
 		}
 
-		endpoint, err := url.JoinPath("http://localhost", "hidden")
+		endpoint, err := url.JoinPath("http://localhost:8080", "internal")
 		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
 		if err != nil {
 			return nil, err
@@ -753,18 +757,19 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 			},
 		}
 
+		// We want the call to fail gracefully. Since the API isn't stable enough to handle load yet.
+		const breakabilityErrMsg = "no additional breakability context available"
 		resp, err := apiClient.CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBodyWithResponse(
 			ctx,
-			orgId,
 			&breakabilityapi.CreateBreakabilityAnalysisHiddenParams{Version: breakabilityApiVersion},
 			reqBody,
 		)
 		if err != nil {
 			logger.Error().Err(err).Msg("Failed to fetch breakability assessment")
-			return mcp.NewToolResultText("No additional breakability context available"), nil
+			return mcp.NewToolResultText(breakabilityErrMsg), nil
 		}
 		if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil {
-			return mcp.NewToolResultText("Error: Unexpected response format from API"), nil
+			return mcp.NewToolResultText(breakabilityErrMsg), nil
 		}
 
 		var response *breakability.BreakabilityResponse

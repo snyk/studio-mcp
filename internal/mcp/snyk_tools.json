@@ -782,7 +782,7 @@
     },
     {
       "name": "snyk_breakability_check",
-      "description": "",
+      "description": "Runs a breaking change assessment for a package version upgrade.",
       "command": [],
       "standardParams": [],
       "profiles": ["experimental"],
@@ -804,13 +804,13 @@
           "name": "package_version_from",
           "type": "string",
           "isRequired": true,
-          "description": "The specific version of the package to look up. If not provided, returns information about the package in general (latest version info)."
+          "description": "The specific version of the package to look up. This is the version before the upgrade."
         },
         {
           "name": "package_version_to",
           "type": "string",
           "isRequired": true,
-          "description": "The package ecosystem. Must be one of: npm, golang, pypi, maven, nuget."
+          "description": "The specific version of the package to look up. This is the version after the upgrade."
         }
       ]
     }
