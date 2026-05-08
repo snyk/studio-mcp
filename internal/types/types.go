@@ -52,6 +52,10 @@ type IssueData struct {
 	Message     string            `json:"message,omitempty"`
 	FingerPrint string            `json:"fingerPrint,omitempty"`
 	IsIgnored   bool              `json:"isIgnored,omitempty"`
+	// IsTransitiveDependency is set by SCA scans only. Pointer + omitempty
+	// preserves false in SCA payloads while keeping the key absent from non-SCA
+	// payloads.
+	IsTransitiveDependency *bool `json:"isTransitiveDependency,omitempty"`
 }
 
 var IssuesSeverity = map[string]Severity{

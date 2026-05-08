@@ -91,22 +91,42 @@ func toIssue(issue ossIssue, targetFilePath string) *types.IssueData {
 	}
 
 	d := &types.IssueData{
-		ID:          issue.Id,
-		Title:       issue.Title,
-		Severity:    issue.Severity,
-		CWEs:        issue.Identifiers.CWE,
-		CVEs:        issue.Identifiers.CVE,
-		PackageName: issue.PackageName,
-		Version:     issue.Version,
-		Ecosystem:   issue.PackageManager,
-		FixedIn:     issue.FixedIn,
-		Remediation: issue.getRemediation(),
-		FilePath:    targetFilePath,
-		Message:     message,
-		IsIgnored:   issue.IsIgnored,
+		ID:                     issue.Id,
+		Title:                  issue.Title,
+		Severity:               issue.Severity,
+		CWEs:                   issue.Identifiers.CWE,
+		CVEs:                   issue.Identifiers.CVE,
+		PackageName:            issue.PackageName,
+		Version:                issue.Version,
+		Ecosystem:              issue.PackageManager,
+		FixedIn:                issue.FixedIn,
+		Remediation:            issue.getRemediation(),
+		FilePath:               targetFilePath,
+		Message:                message,
+		IsIgnored:              issue.IsIgnored,
+		IsTransitiveDependency: isTransitiveDependency(issue),
 	}
 
 	return d
+}
+
+// The Snyk CLI emits the dependency chain in `from`:
+//   - from[0] is the project root (e.g. "my-app@1.0.0")
+//   - from[1] is the direct dependency declared in the manifest
+//   - from[2..n] are transitive packages on the path to the vulnerable package
+func isTransitiveDependency(issue ossIssue) *bool {
+	if len(issue.From) < 2 {
+		return nil
+	}
+	transitive := !(len(issue.From) == 2 && stripVersion(issue.From[1]) == issue.PackageName)
+	return &transitive
+}
+
+func stripVersion(s string) string {
+	if i := strings.LastIndex(s, "@"); i > 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func getAbsTargetFilePath(workDir string, displayTargetFile string) string {
