@@ -118,7 +118,7 @@ func isTransitiveDependency(issue ossIssue) *bool {
 	if len(issue.From) < 2 {
 		return nil
 	}
-	transitive := !(len(issue.From) == 2 && stripVersion(issue.From[1]) == issue.PackageName)
+	transitive := len(issue.From) != 2 || stripVersion(issue.From[1]) != issue.PackageName
 	return &transitive
 }
 

@@ -716,8 +716,8 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 		if err != nil {
 			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
 		}
+		endpoint, err := url.JoinPath(config.GetString(configuration.API_URL), "hidden")
 
-		endpoint, err := url.JoinPath("http://localhost:8080", "internal")
 		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
 		if err != nil {
 			return nil, err
@@ -741,12 +741,12 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 			},
 		}
 
-		reqBody := breakabilityapi.CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody{
+		reqBody := breakabilityapi.CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody{
 			Data: struct {
 				Attributes struct {
 					PackageUpgrades []breakabilityapi.Upgrade `json:"package_upgrades"`
 				} `json:"attributes"`
-				Type breakabilityapi.CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBodyDataType `json:"type"`
+				Type breakabilityapi.CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType `json:"type"`
 			}{
 				Type: breakabilityapi.Breakability,
 				Attributes: struct {
@@ -757,11 +757,17 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 			},
 		}
 
+		orgId, err := uuid.Parse(orgIdStr)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
+		}
+
 		// We want the call to fail gracefully. Since the API isn't stable enough to handle load yet.
 		const breakabilityErrMsg = "no additional breakability context available"
-		resp, err := apiClient.CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBodyWithResponse(
+		resp, err := apiClient.CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBodyWithResponse(
 			ctx,
-			&breakabilityapi.CreateBreakabilityAnalysisHiddenParams{Version: breakabilityApiVersion},
+			orgId,
+			&breakabilityapi.CreateBreakabilityAnalysisParams{Version: breakabilityApiVersion},
 			reqBody,
 		)
 		if err != nil {
@@ -772,8 +778,7 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 			return mcp.NewToolResultText(breakabilityErrMsg), nil
 		}
 
-		var response *breakability.BreakabilityResponse
-		response = breakability.BuildBreakabilityResponse(&resp.ApplicationvndApiJSON200.Data.Attributes)
+		var response = breakability.BuildBreakabilityResponse(&resp.ApplicationvndApiJSON200.Data.Attributes)
 
 		jsonBytes, err := json.Marshal(response)
 		if err != nil {

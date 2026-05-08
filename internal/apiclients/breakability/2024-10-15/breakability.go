@@ -24,9 +24,9 @@ const (
 	Medium BreakabilityResponseAttributesRiskLevel = "medium"
 )
 
-// Defines values for CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBodyDataType.
+// Defines values for CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType.
 const (
-	Breakability CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBodyDataType = "breakability"
+	Breakability CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType = "breakability"
 )
 
 // ActualVersion Resolved API version
@@ -156,27 +156,27 @@ type N409 = ErrorDocument
 // N500 defines model for 500.
 type N500 = ErrorDocument
 
-// CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBody defines parameters for CreateBreakabilityAnalysisHidden.
-type CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBody struct {
+// CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBody defines parameters for CreateBreakabilityAnalysis.
+type CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBody struct {
 	Data struct {
 		Attributes struct {
 			PackageUpgrades []Upgrade `json:"package_upgrades"`
 		} `json:"attributes"`
-		Type CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBodyDataType `json:"type"`
+		Type CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType `json:"type"`
 	} `json:"data"`
 }
 
-// CreateBreakabilityAnalysisHiddenParams defines parameters for CreateBreakabilityAnalysisHidden.
-type CreateBreakabilityAnalysisHiddenParams struct {
+// CreateBreakabilityAnalysisParams defines parameters for CreateBreakabilityAnalysis.
+type CreateBreakabilityAnalysisParams struct {
 	// Version The requested version of the endpoint to process the request
 	Version Version `form:"version" json:"version"`
 }
 
-// CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBodyDataType defines parameters for CreateBreakabilityAnalysisHidden.
-type CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBodyDataType string
+// CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType defines parameters for CreateBreakabilityAnalysis.
+type CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType string
 
-// CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody defines body for CreateBreakabilityAnalysisHidden for application/vnd.api+json ContentType.
-type CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONBody
+// CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody defines body for CreateBreakabilityAnalysis for application/vnd.api+json ContentType.
+type CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBody
 
 // AsLinkProperty0 returns the union data inside the LinkProperty as a LinkProperty0
 func (t LinkProperty) AsLinkProperty0() (LinkProperty0, error) {
@@ -313,14 +313,20 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// CreateBreakabilityAnalysisHiddenWithBody request with any body
-	CreateBreakabilityAnalysisHiddenWithBody(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListAPIVersions request
+	ListAPIVersions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBody(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, body CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetAPIVersion request
+	GetAPIVersion(ctx context.Context, version string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateBreakabilityAnalysisWithBody request with any body
+	CreateBreakabilityAnalysisWithBody(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBody(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, body CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-func (c *Client) CreateBreakabilityAnalysisHiddenWithBody(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateBreakabilityAnalysisHiddenRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) ListAPIVersions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAPIVersionsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -331,8 +337,8 @@ func (c *Client) CreateBreakabilityAnalysisHiddenWithBody(ctx context.Context, p
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBody(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, body CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateBreakabilityAnalysisHiddenRequestWithApplicationVndAPIPlusJSONBody(c.Server, params, body)
+func (c *Client) GetAPIVersion(ctx context.Context, version string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAPIVersionRequest(c.Server, version)
 	if err != nil {
 		return nil, err
 	}
@@ -343,19 +349,32 @@ func (c *Client) CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBo
 	return c.Client.Do(req)
 }
 
-// NewCreateBreakabilityAnalysisHiddenRequestWithApplicationVndAPIPlusJSONBody calls the generic CreateBreakabilityAnalysisHidden builder with application/vnd.api+json body
-func NewCreateBreakabilityAnalysisHiddenRequestWithApplicationVndAPIPlusJSONBody(server string, params *CreateBreakabilityAnalysisHiddenParams, body CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
+func (c *Client) CreateBreakabilityAnalysisWithBody(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateBreakabilityAnalysisRequestWithBody(c.Server, orgId, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
-	bodyReader = bytes.NewReader(buf)
-	return NewCreateBreakabilityAnalysisHiddenRequestWithBody(server, params, "application/vnd.api+json", bodyReader)
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
-// NewCreateBreakabilityAnalysisHiddenRequestWithBody generates requests for CreateBreakabilityAnalysisHidden with any type of body
-func NewCreateBreakabilityAnalysisHiddenRequestWithBody(server string, params *CreateBreakabilityAnalysisHiddenParams, contentType string, body io.Reader) (*http.Request, error) {
+func (c *Client) CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBody(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, body CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateBreakabilityAnalysisRequestWithApplicationVndAPIPlusJSONBody(c.Server, orgId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NewListAPIVersionsRequest generates requests for ListAPIVersions
+func NewListAPIVersionsRequest(server string) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -363,7 +382,86 @@ func NewCreateBreakabilityAnalysisHiddenRequestWithBody(server string, params *C
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/breakability")
+	operationPath := fmt.Sprintf("/openapi")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetAPIVersionRequest generates requests for GetAPIVersion
+func NewGetAPIVersionRequest(server string, version string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "version", runtime.ParamLocationPath, version)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/openapi/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateBreakabilityAnalysisRequestWithApplicationVndAPIPlusJSONBody calls the generic CreateBreakabilityAnalysis builder with application/vnd.api+json body
+func NewCreateBreakabilityAnalysisRequestWithApplicationVndAPIPlusJSONBody(server string, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, body CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateBreakabilityAnalysisRequestWithBody(server, orgId, params, "application/vnd.api+json", bodyReader)
+}
+
+// NewCreateBreakabilityAnalysisRequestWithBody generates requests for CreateBreakabilityAnalysis with any type of body
+func NewCreateBreakabilityAnalysisRequestWithBody(server string, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "org_id", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/breakability", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -444,13 +542,71 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// CreateBreakabilityAnalysisHiddenWithBodyWithResponse request with any body
-	CreateBreakabilityAnalysisHiddenWithBodyWithResponse(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisHiddenResponse, error)
+	// ListAPIVersionsWithResponse request
+	ListAPIVersionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAPIVersionsResponse, error)
 
-	CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBodyWithResponse(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, body CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisHiddenResponse, error)
+	// GetAPIVersionWithResponse request
+	GetAPIVersionWithResponse(ctx context.Context, version string, reqEditors ...RequestEditorFn) (*GetAPIVersionResponse, error)
+
+	// CreateBreakabilityAnalysisWithBodyWithResponse request with any body
+	CreateBreakabilityAnalysisWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisResponse, error)
+
+	CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, body CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisResponse, error)
 }
 
-type CreateBreakabilityAnalysisHiddenResponse struct {
+type ListAPIVersionsResponse struct {
+	Body                     []byte
+	HTTPResponse             *http.Response
+	JSON200                  *[]string
+	ApplicationvndApiJSON400 *N400
+	ApplicationvndApiJSON401 *N401
+	ApplicationvndApiJSON404 *N404
+	ApplicationvndApiJSON500 *N500
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAPIVersionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAPIVersionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetAPIVersionResponse struct {
+	Body                     []byte
+	HTTPResponse             *http.Response
+	JSON200                  *map[string]interface{}
+	ApplicationvndApiJSON400 *N400
+	ApplicationvndApiJSON401 *N401
+	ApplicationvndApiJSON404 *N404
+	ApplicationvndApiJSON500 *N500
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAPIVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAPIVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateBreakabilityAnalysisResponse struct {
 	Body                     []byte
 	HTTPResponse             *http.Response
 	ApplicationvndApiJSON200 *struct {
@@ -472,7 +628,7 @@ type CreateBreakabilityAnalysisHiddenResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateBreakabilityAnalysisHiddenResponse) Status() string {
+func (r CreateBreakabilityAnalysisResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -480,39 +636,165 @@ func (r CreateBreakabilityAnalysisHiddenResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateBreakabilityAnalysisHiddenResponse) StatusCode() int {
+func (r CreateBreakabilityAnalysisResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-// CreateBreakabilityAnalysisHiddenWithBodyWithResponse request with arbitrary body returning *CreateBreakabilityAnalysisHiddenResponse
-func (c *ClientWithResponses) CreateBreakabilityAnalysisHiddenWithBodyWithResponse(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisHiddenResponse, error) {
-	rsp, err := c.CreateBreakabilityAnalysisHiddenWithBody(ctx, params, contentType, body, reqEditors...)
+// ListAPIVersionsWithResponse request returning *ListAPIVersionsResponse
+func (c *ClientWithResponses) ListAPIVersionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAPIVersionsResponse, error) {
+	rsp, err := c.ListAPIVersions(ctx, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateBreakabilityAnalysisHiddenResponse(rsp)
+	return ParseListAPIVersionsResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBodyWithResponse(ctx context.Context, params *CreateBreakabilityAnalysisHiddenParams, body CreateBreakabilityAnalysisHiddenApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisHiddenResponse, error) {
-	rsp, err := c.CreateBreakabilityAnalysisHiddenWithApplicationVndAPIPlusJSONBody(ctx, params, body, reqEditors...)
+// GetAPIVersionWithResponse request returning *GetAPIVersionResponse
+func (c *ClientWithResponses) GetAPIVersionWithResponse(ctx context.Context, version string, reqEditors ...RequestEditorFn) (*GetAPIVersionResponse, error) {
+	rsp, err := c.GetAPIVersion(ctx, version, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateBreakabilityAnalysisHiddenResponse(rsp)
+	return ParseGetAPIVersionResponse(rsp)
 }
 
-// ParseCreateBreakabilityAnalysisHiddenResponse parses an HTTP response from a CreateBreakabilityAnalysisHiddenWithResponse call
-func ParseCreateBreakabilityAnalysisHiddenResponse(rsp *http.Response) (*CreateBreakabilityAnalysisHiddenResponse, error) {
+// CreateBreakabilityAnalysisWithBodyWithResponse request with arbitrary body returning *CreateBreakabilityAnalysisResponse
+func (c *ClientWithResponses) CreateBreakabilityAnalysisWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisResponse, error) {
+	rsp, err := c.CreateBreakabilityAnalysisWithBody(ctx, orgId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateBreakabilityAnalysisResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, params *CreateBreakabilityAnalysisParams, body CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateBreakabilityAnalysisResponse, error) {
+	rsp, err := c.CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBody(ctx, orgId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateBreakabilityAnalysisResponse(rsp)
+}
+
+// ParseListAPIVersionsResponse parses an HTTP response from a ListAPIVersionsWithResponse call
+func ParseListAPIVersionsResponse(rsp *http.Response) (*ListAPIVersionsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateBreakabilityAnalysisHiddenResponse{
+	response := &ListAPIVersionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest N500
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAPIVersionResponse parses an HTTP response from a GetAPIVersionWithResponse call
+func ParseGetAPIVersionResponse(rsp *http.Response) (*GetAPIVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAPIVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest N500
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationvndApiJSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateBreakabilityAnalysisResponse parses an HTTP response from a CreateBreakabilityAnalysisWithResponse call
+func ParseCreateBreakabilityAnalysisResponse(rsp *http.Response) (*CreateBreakabilityAnalysisResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateBreakabilityAnalysisResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
