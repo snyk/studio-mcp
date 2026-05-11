@@ -181,6 +181,7 @@ func TestIsToolInProfile(t *testing.T) {
 
 		// Tools in experimental only
 		{"snyk_secret_scan", false, false, true},
+		{"snyk_breakability_check", false, false, true},
 	}
 
 	// Load actual tools from JSON

@@ -705,24 +705,23 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 		if err != nil {
 			return nil, err
 		}
-		// Get org ID from configuration
 		config := invocationCtx.GetEngine().GetConfiguration()
 		orgIdStr := config.GetString(configuration.ORGANIZATION)
 		if orgIdStr == "" {
 			return mcp.NewToolResultText("Error: Organization ID not configured. Please set an organization using 'snyk config set org=<org-id>'"), nil
 		}
 
-		//orgId, err := uuid.Parse(orgIdStr)
+		orgId, err := uuid.Parse(orgIdStr)
 		if err != nil {
 			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
 		}
-		endpoint, err := url.JoinPath(config.GetString(configuration.API_URL), "hidden")
 
-		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
+		endpoint, err := url.JoinPath(config.GetString(configuration.API_URL), "hidden")
 		if err != nil {
 			return nil, err
 		}
-		// Create the package API client
+
+		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
 		apiClient, err := breakabilityapi.NewClientWithResponses(endpoint, breakabilityapi.WithHTTPClient(httpClient))
 		if err != nil {
 			logger.Error().Err(err).Msg("Failed to create breakability API client")
@@ -755,11 +754,6 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 					PackageUpgrades: breakability.ToAPIUpgrades(upgrades),
 				},
 			},
-		}
-
-		orgId, err := uuid.Parse(orgIdStr)
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
 		}
 
 		// We want the call to fail gracefully. Since the API isn't stable enough to handle load yet.
