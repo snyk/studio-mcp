@@ -1,5 +1,5 @@
 /*
- * © 2025 Snyk Limited
+ * © 2026 Snyk Limited
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,6 @@ import (
 )
 
 func TestBuildBreakabilityResponse(t *testing.T) {
-	const (
-		highInstructions   = "IMPORTANT: Breaking change detected. If Snyk reported another upgrade path that is non-breaking use it. Otherwise, inform the user of the breaking change first."
-		mediumInstructions = "Check the assessment and determine if the change is breaking or not. If it is breaking, inform the user of the breaking change first. Otherwise, proceed with the upgrade."
-		lowInstructions    = "Non-breaking change, proceed with the upgrade."
-	)
-
 	testCases := []struct {
 		name                 string
 		attrs                *breakabilityapi.BreakabilityResponseAttributes
@@ -41,7 +35,7 @@ func TestBuildBreakabilityResponse(t *testing.T) {
 			},
 			expectedRiskLevel:    "high",
 			expectedAssessment:   "API removed in this major version",
-			expectedInstructions: highInstructions,
+			expectedInstructions: HighRiskInstruction,
 		},
 		{
 			name: "medium risk returns ambiguous instructions",
@@ -51,7 +45,7 @@ func TestBuildBreakabilityResponse(t *testing.T) {
 			},
 			expectedRiskLevel:    "medium",
 			expectedAssessment:   "Some method signatures changed",
-			expectedInstructions: mediumInstructions,
+			expectedInstructions: MediumRiskInstruction,
 		},
 		{
 			name: "low risk returns proceed instructions",
@@ -61,7 +55,7 @@ func TestBuildBreakabilityResponse(t *testing.T) {
 			},
 			expectedRiskLevel:    "low",
 			expectedAssessment:   "Patch version bump only",
-			expectedInstructions: lowInstructions,
+			expectedInstructions: LowRiskInstruction,
 		},
 		{
 			name: "empty summary is preserved",
@@ -71,7 +65,7 @@ func TestBuildBreakabilityResponse(t *testing.T) {
 			},
 			expectedRiskLevel:    "low",
 			expectedAssessment:   "",
-			expectedInstructions: lowInstructions,
+			expectedInstructions: LowRiskInstruction,
 		},
 		{
 			name: "unknown risk level falls through to non-breaking instructions",
@@ -81,7 +75,7 @@ func TestBuildBreakabilityResponse(t *testing.T) {
 			},
 			expectedRiskLevel:    "unknown",
 			expectedAssessment:   "n/a",
-			expectedInstructions: lowInstructions,
+			expectedInstructions: "",
 		},
 	}
 
