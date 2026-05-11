@@ -169,27 +169,16 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 		return nil
 	}
 
-	// Look for any server where command contains 'snyk' and args are ["mcp", "-t", "stdio"]
+	// Look for any server where command contains McpServerCommand and args are ["mcp", "-t", "stdio"]
 	expectedArgs := []string{shared.McpServerStdioArg1, shared.McpServerStdioArg2, shared.McpServerStdioArg3}
-	var matchingKeys []string
-
-	for key, serverRaw := range mcpServers {
-		if serverMap, ok := serverRaw.(map[string]interface{}); ok {
-			if argsVal, ok := serverMap["args"].([]interface{}); ok {
-				if argsMatch(argsVal, expectedArgs) {
-					if cmdVal, ok := serverMap["command"].(string); ok {
-						// Check if command path includes 'snyk'
-						if strings.Contains(strings.ToLower(cmdVal), strings.ToLower(shared.McpServerCommand)) {
-							matchingKeys = append(matchingKeys, key)
-						}
-					}
-				}
-			}
-		}
-	}
+	matchingKeys := findMatchingServerKeys(mcpServers, expectedArgs, 2)
 
 	// Only remove if exactly one matching server is found
-	if len(matchingKeys) != 1 {
+	if len(matchingKeys) == 0 {
+		return nil
+	}
+	
+	if len(matchingKeys) > 1 {
 		logger.Debug().Msgf("Found %d servers with command containing 'snyk' and args matching SAI MCP, not removing (expected exactly 1)", len(matchingKeys))
 		return nil
 	}
@@ -215,32 +204,65 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 
 // findServerByCommandAndArgs finds the first server key that matches the given command and args.
 // Returns empty string if no match is found.
-// This is used to identify an existing SAI MCP server configuration.
 func findServerByCommandAndArgs(servers map[string]interface{}, command string, args []string) string {
-	for key, serverRaw := range servers {
-		if serverMap, ok := serverRaw.(map[string]interface{}); ok {
-			if argsVal, ok := serverMap["args"].([]interface{}); ok {
-				if argsMatch(argsVal, args) {
-					if cmdVal, ok := serverMap["command"].(string); ok {
-						// For update operations, check if command contains the MCP server command identifier
-						if strings.Contains(strings.ToLower(cmdVal), strings.ToLower(shared.McpServerCommand)) {
-							return key
-						}
-					}
-				}
-			}
-		}
+	matchingKeys := findMatchingServerKeys(servers, args, 1)
+	if len(matchingKeys) == 0 {
+		return ""
 	}
-	return ""
+	return matchingKeys[0]
+}
+
+// findMatchingServerKeys finds all server keys that match the given args and command, returning up to maxResultCount results.
+func findMatchingServerKeys(servers map[string]interface{}, expectedArgs []string, maxResultCount int) []string {
+	var matchingKeys []string
+
+	for key, serverRaw := range servers {
+		if len(matchingKeys) >= maxResultCount {
+			break
+		}
+
+		serverMap, ok := serverRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		argsVal, argsExists := serverMap["args"].([]interface{})
+		if !argsExists {
+			continue
+		}
+
+		if !argsMatch(argsVal, expectedArgs) {
+			continue
+		}
+
+		cmdVal, cmdExists := serverMap["command"].(string)
+		if !cmdExists || cmdVal == "" {
+			continue
+		}
+
+		if !strings.Contains(strings.ToLower(cmdVal), strings.ToLower(shared.McpServerCommand)) {
+			continue
+		}
+
+		matchingKeys = append(matchingKeys, key)
+	}
+
+	return matchingKeys
 }
 
 // argsMatch checks if two argument lists are equal
 func argsMatch(ifaceArgs []interface{}, stringArgs []string) bool {
+	if ifaceArgs == nil || stringArgs == nil {
+		return (ifaceArgs == nil) && (stringArgs == nil)
+	}
+
 	if len(ifaceArgs) != len(stringArgs) {
 		return false
 	}
+
 	for i, arg := range ifaceArgs {
-		if str, ok := arg.(string); !ok || str != stringArgs[i] {
+		str, ok := arg.(string)
+		if !ok || str != stringArgs[i] {
 			return false
 		}
 	}
