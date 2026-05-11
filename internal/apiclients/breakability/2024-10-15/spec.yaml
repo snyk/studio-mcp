@@ -41,12 +41,12 @@ components:
         A header containing the version stage of the endpoint. This stage describes the guarantees snyk provides surrounding stability of the endpoint.
       schema:
         enum:
-          - wip
-          - experimental
-          - beta
-          - ga
-          - deprecated
-          - sunset
+        - wip
+        - experimental
+        - beta
+        - ga
+        - deprecated
+        - sunset
         example: ga
         type: string
   parameters:
@@ -196,17 +196,17 @@ components:
           description: The estimated breakability risk level of the analyzed package
             upgrades.
           enum:
-            - low
-            - medium
-            - high
+          - low
+          - medium
+          - high
           type: string
         summary:
           description: A breakability assessment summary, outlining reasoning for
             the estimated risk_level and possible mitigations.
           type: string
       required:
-        - risk_level
-        - summary
+      - risk_level
+      - summary
       type: object
     Error:
       additionalProperties: false
@@ -264,22 +264,22 @@ components:
           example: Bad request
           type: string
       required:
-        - status
-        - detail
+      - status
+      - detail
       type: object
     ErrorDocument:
       additionalProperties: false
       example:
         errors:
-          - detail: Permission denied for this resource
-            status: "403"
+        - detail: Permission denied for this resource
+          status: "403"
         jsonapi:
           version: "1.0"
       properties:
         errors:
           example:
-            - detail: Permission denied for this resource
-              status: "403"
+          - detail: Permission denied for this resource
+            status: "403"
           items:
             $ref: '#/components/schemas/Error'
           minItems: 1
@@ -287,8 +287,8 @@ components:
         jsonapi:
           $ref: '#/components/schemas/JsonApi'
       required:
-        - jsonapi
-        - errors
+      - jsonapi
+      - errors
       type: object
     ErrorLink:
       additionalProperties: false
@@ -311,27 +311,27 @@ components:
           pattern: ^(0|[1-9]\d*)\.(0|[1-9]\d*)$
           type: string
       required:
-        - version
+      - version
       type: object
     LinkProperty:
       example: https://example.com/api/resource
       oneOf:
-        - description: A string containing the link’s URL.
-          example: https://example.com/api/resource
-          type: string
-        - additionalProperties: false
-          example:
-            href: https://example.com/api/resource
-          properties:
-            href:
-              description: A string containing the link’s URL.
-              example: https://example.com/api/resource
-              type: string
-            meta:
-              $ref: '#/components/schemas/Meta'
-          required:
-            - href
-          type: object
+      - description: A string containing the link’s URL.
+        example: https://example.com/api/resource
+        type: string
+      - additionalProperties: false
+        example:
+          href: https://example.com/api/resource
+        properties:
+          href:
+            description: A string containing the link’s URL.
+            example: https://example.com/api/resource
+            type: string
+          meta:
+            $ref: '#/components/schemas/Meta'
+        required:
+        - href
+        type: object
     Meta:
       additionalProperties: true
       description: Free-form object that may contain non-standard information.
@@ -340,8 +340,8 @@ components:
         key2:
           sub_key: sub_value
         key3:
-          - array_value1
-          - array_value2
+        - array_value1
+        - array_value2
       type: object
     PaginatedLinks:
       additionalProperties: false
@@ -389,9 +389,9 @@ components:
           minLength: 1
           type: string
       required:
-        - name
-        - from_version
-        - to_version
+      - name
+      - from_version
+      - to_version
       type: object
 info:
   title: breakability-service-hidden
@@ -423,18 +423,18 @@ paths:
         "500":
           $ref: '#/components/responses/500'
       tags:
-        - OpenAPI
+      - OpenAPI
   /openapi/{version}:
     get:
       description: Get OpenAPI specification effective at version.
       operationId: getAPIVersion
       parameters:
-        - description: The requested version of the API
-          in: path
-          name: version
-          required: true
-          schema:
-            type: string
+      - description: The requested version of the API
+        in: path
+        name: version
+        required: true
+        schema:
+          type: string
       responses:
         "200":
           content:
@@ -458,20 +458,20 @@ paths:
         "500":
           $ref: '#/components/responses/500'
       tags:
-        - OpenAPI
+      - OpenAPI
   /orgs/{org_id}/breakability:
     post:
       description: Generate a breakability assessment for one or more package upgrades
       operationId: createBreakabilityAnalysis
       parameters:
-        - description: The public ID of the organization
-          in: path
-          name: org_id
-          required: true
-          schema:
-            format: uuid
-            type: string
-        - $ref: '#/components/parameters/Version'
+      - description: The public ID of the organization
+        in: path
+        name: org_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+      - $ref: '#/components/parameters/Version'
       requestBody:
         content:
           application/vnd.api+json:
@@ -491,18 +491,18 @@ paths:
                           minItems: 1
                           type: array
                       required:
-                        - package_upgrades
+                      - package_upgrades
                       type: object
                     type:
                       enum:
-                        - breakability
+                      - breakability
                       type: string
                   required:
-                    - type
-                    - attributes
+                  - type
+                  - attributes
                   type: object
               required:
-                - data
+              - data
               type: object
         required: true
       responses:
@@ -525,9 +525,9 @@ paths:
                       type:
                         $ref: '#/components/schemas/Types'
                     required:
-                      - id
-                      - type
-                      - attributes
+                    - id
+                    - type
+                    - attributes
                     type: object
                   jsonapi:
                     $ref: '#/components/schemas/JsonApi'
@@ -567,31 +567,31 @@ paths:
           $ref: '#/components/responses/500'
       summary: Breakability Analysis
       tags:
-        - Breakability
+      - Breakability
       x-cerberus:
         authentication:
           strategies:
-            - InternalJWT: {}
+          - InternalJWT: {}
         authorization:
           skip: true
         enableAccessAudit: true
       x-snyk-api-lifecycle: released
       x-snyk-api-owners:
-        - '@snyk/open-source_fix-analysis'
+      - '@snyk/open-source_fix-analysis'
       x-snyk-api-releases:
-        - 2024-10-15~beta
+      - 2024-10-15~beta
       x-snyk-api-resource: breakability
       x-snyk-api-stability: beta
       x-snyk-api-version: 2024-10-15~beta
       x-stability-level: beta
 servers:
-  - description: breakability-service
-    url: /hidden
+- description: breakability-service
+  url: /hidden
 tags:
-  - description: The OpenAPI specification for breakability-service.
-    name: OpenAPI
+- description: The OpenAPI specification for breakability-service.
+  name: OpenAPI
 x-cerberus:
   authentication:
     strategies:
-      - InternalJWT: {}
+    - InternalJWT: {}
 x-snyk-api-version: "2024-10-15"
