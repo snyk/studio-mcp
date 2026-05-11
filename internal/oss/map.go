@@ -110,10 +110,36 @@ func toIssue(issue ossIssue, targetFilePath string) *types.IssueData {
 	return d
 }
 
+// isTransitiveDependency determines whether the vulnerable package was pulled
+// in as a transitive (indirect) dependency or declared directly in the
+// project's manifest.
+//
 // The Snyk CLI emits the dependency chain in `from`:
 //   - from[0] is the project root (e.g. "my-app@1.0.0")
 //   - from[1] is the direct dependency declared in the manifest
 //   - from[2..n] are transitive packages on the path to the vulnerable package
+//
+// Return values:
+//
+//   - nil   — undeterminable. `from` is missing or has fewer than 2 entries
+//     (e.g. the CLI omitted the chain, or the project root itself
+//     is the affected package), so we cannot tell direct vs transitive
+//     and we deliberately leave the field absent rather than guess.
+//
+//   - false — direct dependency. The chain has exactly 2 entries
+//     (`[root, vulnerable]`) AND `from[1]` (with any `@version` suffix
+//     stripped) matches `PackageName`. That means the vulnerable
+//     package is declared directly in the manifest with no
+//     intermediate hops.
+//
+//   - true  — transitive dependency. Either:
+//     (a) the chain has more than 2 entries (there is at least one
+//     intermediate package between the root and the vulnerable
+//     package), OR
+//     (b) the chain has exactly 2 entries but `from[1]` does not
+//     match `PackageName` — e.g. the vulnerability is reported on a
+//     bundled/aliased package whose entry in the manifest has a
+//     different name than the affected package itself.
 func isTransitiveDependency(issue ossIssue) *bool {
 	if len(issue.From) < 2 {
 		return nil
