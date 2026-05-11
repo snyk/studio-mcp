@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/snyk/studio-mcp/internal/types"
@@ -105,6 +106,7 @@ func toIssue(issue ossIssue, targetFilePath string) *types.IssueData {
 		Message:                message,
 		IsIgnored:              issue.IsIgnored,
 		IsTransitiveDependency: isTransitiveDependency(issue),
+		IntroducedThrough:      introducedThroughChain(issue),
 	}
 
 	return d
@@ -146,6 +148,13 @@ func isTransitiveDependency(issue ossIssue) *bool {
 	}
 	transitive := len(issue.From) != 2 || stripVersion(issue.From[1]) != issue.PackageName
 	return &transitive
+}
+
+func introducedThroughChain(issue ossIssue) []string {
+	if len(issue.From) < 3 {
+		return nil
+	}
+	return slices.Clone(issue.From[1:])
 }
 
 func stripVersion(s string) string {

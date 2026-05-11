@@ -2,6 +2,7 @@ package oss
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -145,9 +146,10 @@ func TestIsTransitiveDependency(t *testing.T) {
 
 func TestToIssue_SetsIsTransitiveDependency(t *testing.T) {
 	testCases := []struct {
-		name     string
-		issue    ossIssue
-		expected bool
+		name                      string
+		issue                     ossIssue
+		expected                  bool
+		expectedIntroducedThrough []string
 	}{
 		{
 			name: "direct dependency populates pointer to false",
@@ -159,7 +161,8 @@ func TestToIssue_SetsIsTransitiveDependency(t *testing.T) {
 				Version:     "4.17.10",
 				From:        []string{"app@1.0.0", "lodash@4.17.10"},
 			},
-			expected: false,
+			expected:                  false,
+			expectedIntroducedThrough: nil,
 		},
 		{
 			name: "transitive dependency populates pointer to true",
@@ -172,6 +175,37 @@ func TestToIssue_SetsIsTransitiveDependency(t *testing.T) {
 				From:        []string{"app@1.0.0", "express@4.0.0", "lodash@4.17.10"},
 			},
 			expected: true,
+			expectedIntroducedThrough: []string{
+				"express@4.0.0", "lodash@4.17.10",
+			},
+		},
+		{
+			name: "deep transitive chain in introducedThrough",
+			issue: ossIssue{
+				Id:          "SNYK-JS-MINIMIST-1",
+				Title:       "Prototype Pollution",
+				Severity:    "high",
+				PackageName: "minimist",
+				Version:     "1.2.0",
+				From:        []string{"app@1.0.0", "a@1.0.0", "b@1.0.0", "c@1.0.0", "minimist@1.2.0"},
+			},
+			expected: true,
+			expectedIntroducedThrough: []string{
+				"a@1.0.0", "b@1.0.0", "c@1.0.0", "minimist@1.2.0",
+			},
+		},
+		{
+			name: "transitive with len(from)<3 leaves introducedThrough empty",
+			issue: ossIssue{
+				Id:          "SNYK-JS-LODASH-1",
+				Title:       "Prototype Pollution",
+				Severity:    "high",
+				PackageName: "lodash",
+				Version:     "4.17.10",
+				From:        []string{"app@1.0.0", "express@4.0.0"},
+			},
+			expected:                  true,
+			expectedIntroducedThrough: nil,
 		},
 	}
 
@@ -182,8 +216,33 @@ func TestToIssue_SetsIsTransitiveDependency(t *testing.T) {
 			require.NotNil(t, result)
 			require.NotNil(t, result.IsTransitiveDependency)
 			assert.Equal(t, tc.expected, *result.IsTransitiveDependency)
+			assert.Equal(t, tc.expectedIntroducedThrough, result.IntroducedThrough)
 		})
 	}
+}
+
+func TestIntroducedThroughChain(t *testing.T) {
+	assert.Nil(t, introducedThroughChain(ossIssue{From: []string{"app@1"}}))
+	assert.Nil(t, introducedThroughChain(ossIssue{From: []string{"app@1", "lodash@1"}}))
+	assert.Equal(t, []string{"express@4", "lodash@1"}, introducedThroughChain(ossIssue{
+		From: []string{"app@1", "express@4", "lodash@1"},
+	}))
+	assert.Nil(t, introducedThroughChain(ossIssue{
+		PackageName: "lodash",
+		From:        []string{"app@1.0.0", "express@4.0.0"},
+	}))
+}
+
+func TestIntroducedThroughChain_directDependencyReturnsNil(t *testing.T) {
+	issue := ossIssue{
+		PackageName: "lodash",
+		From:        []string{"app@1.0.0", "lodash@4.17.10"},
+	}
+	transitive := isTransitiveDependency(issue)
+	require.NotNil(t, transitive)
+	require.False(t, *transitive, "fixture should be a direct dependency")
+	assert.Nil(t, introducedThroughChain(issue),
+		"direct dependency must not populate introduced-through chain")
 }
 
 func boolPtr(v bool) *bool {
@@ -226,9 +285,9 @@ func TestIssueData_JSONSerialization_IsTransitiveDependency(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			data := types.IssueData{
-				ID:                 "TEST-1",
-				Title:              "Test",
-				Severity:           "high",
+				ID:                     "TEST-1",
+				Title:                  "Test",
+				Severity:               "high",
 				IsTransitiveDependency: tc.isTransitivePtr,
 			}
 
@@ -242,4 +301,38 @@ func TestIssueData_JSONSerialization_IsTransitiveDependency(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssueData_JSONSerialization_IntroducedThroughOmitempty(t *testing.T) {
+	falseVal := false
+	direct := types.IssueData{
+		ID:                     "TEST-1",
+		Title:                  "Test",
+		Severity:               "high",
+		IsTransitiveDependency: &falseVal,
+		IntroducedThrough:      nil,
+	}
+	out, err := json.Marshal(direct)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "introducedThrough", "nil slice must omit key (direct / no chain)")
+
+	trueVal := true
+	transitive := types.IssueData{
+		ID:                     "TEST-2",
+		Title:                  "Test",
+		Severity:               "high",
+		IsTransitiveDependency: &trueVal,
+		IntroducedThrough:      []string{"express@4", "lodash@1"},
+	}
+	out, err = json.Marshal(transitive)
+	require.NoError(t, err)
+	s := string(out)
+	assert.Contains(t, s, "introducedThrough")
+	assert.Contains(t, s, "express@4")
+	assert.Contains(t, s, "lodash@1")
+
+	var roundTrip types.IssueData
+	require.NoError(t, json.Unmarshal(out, &roundTrip))
+	require.NotNil(t, roundTrip.IntroducedThrough)
+	assert.True(t, slices.Equal([]string{"express@4", "lodash@1"}, roundTrip.IntroducedThrough))
 }
