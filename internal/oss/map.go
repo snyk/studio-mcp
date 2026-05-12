@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/snyk/studio-mcp/internal/types"
@@ -91,22 +92,76 @@ func toIssue(issue ossIssue, targetFilePath string) *types.IssueData {
 	}
 
 	d := &types.IssueData{
-		ID:          issue.Id,
-		Title:       issue.Title,
-		Severity:    issue.Severity,
-		CWEs:        issue.Identifiers.CWE,
-		CVEs:        issue.Identifiers.CVE,
-		PackageName: issue.PackageName,
-		Version:     issue.Version,
-		Ecosystem:   issue.PackageManager,
-		FixedIn:     issue.FixedIn,
-		Remediation: issue.getRemediation(),
-		FilePath:    targetFilePath,
-		Message:     message,
-		IsIgnored:   issue.IsIgnored,
+		ID:                     issue.Id,
+		Title:                  issue.Title,
+		Severity:               issue.Severity,
+		CWEs:                   issue.Identifiers.CWE,
+		CVEs:                   issue.Identifiers.CVE,
+		PackageName:            issue.PackageName,
+		Version:                issue.Version,
+		Ecosystem:              issue.PackageManager,
+		FixedIn:                issue.FixedIn,
+		Remediation:            issue.getRemediation(),
+		FilePath:               targetFilePath,
+		Message:                message,
+		IsIgnored:              issue.IsIgnored,
+		IsTransitiveDependency: isTransitiveDependency(issue),
+		IntroducedThrough:      introducedThroughChain(issue),
 	}
 
 	return d
+}
+
+// isTransitiveDependency determines whether the vulnerable package was pulled
+// in as a transitive (indirect) dependency or declared directly in the
+// project's manifest.
+//
+// The Snyk CLI emits the dependency chain in `from`:
+//   - from[0] is the project root (e.g. "my-app@1.0.0")
+//   - from[1] is the direct dependency declared in the manifest
+//   - from[2..n] are transitive packages on the path to the vulnerable package
+//
+// Return values:
+//
+//   - nil   — undeterminable. `from` is missing or has fewer than 2 entries
+//     (e.g. the CLI omitted the chain, or the project root itself
+//     is the affected package), so we cannot tell direct vs transitive
+//     and we deliberately leave the field absent rather than guess.
+//
+//   - false — direct dependency. The chain has exactly 2 entries
+//     (`[root, vulnerable]`) AND `from[1]` (with any `@version` suffix
+//     stripped) matches `PackageName`. That means the vulnerable
+//     package is declared directly in the manifest with no
+//     intermediate hops.
+//
+//   - true  — transitive dependency. Either:
+//     (a) the chain has more than 2 entries (there is at least one
+//     intermediate package between the root and the vulnerable
+//     package), OR
+//     (b) the chain has exactly 2 entries but `from[1]` does not
+//     match `PackageName` — e.g. the vulnerability is reported on a
+//     bundled/aliased package whose entry in the manifest has a
+//     different name than the affected package itself.
+func isTransitiveDependency(issue ossIssue) *bool {
+	if len(issue.From) < 2 {
+		return nil
+	}
+	transitive := len(issue.From) != 2 || stripVersion(issue.From[1]) != issue.PackageName
+	return &transitive
+}
+
+func introducedThroughChain(issue ossIssue) []string {
+	if len(issue.From) < 3 {
+		return nil
+	}
+	return slices.Clone(issue.From[1:])
+}
+
+func stripVersion(s string) string {
+	if i := strings.LastIndex(s, "@"); i > 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func getAbsTargetFilePath(workDir string, displayTargetFile string) string {

@@ -41,8 +41,10 @@ import (
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
 	"github.com/snyk/go-application-framework/pkg/workflow"
 	"github.com/snyk/studio-mcp/internal/analytics"
+	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2024-10-15"
 	packageapi "github.com/snyk/studio-mcp/internal/apiclients/package/2024-10-15"
 	"github.com/snyk/studio-mcp/internal/authentication"
+	"github.com/snyk/studio-mcp/internal/breakability"
 	"github.com/snyk/studio-mcp/internal/package_health"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
@@ -68,6 +70,7 @@ var ToolName = struct {
 	Trust         string
 	SendFeedback  string
 	PackageHealth string
+	Breakability  string
 }{
 	ScaTest:       "snyk_sca_scan",
 	CodeTest:      "snyk_code_scan",
@@ -77,6 +80,7 @@ var ToolName = struct {
 	Trust:         "snyk_trust",
 	SendFeedback:  "snyk_send_feedback",
 	PackageHealth: "snyk_package_health_check",
+	Breakability:  "snyk_breakability_check",
 }
 
 type SnykMcpToolAnnotations struct {
@@ -174,6 +178,8 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, p
 			m.mcpServer.AddTool(tool, m.snykAuthHandler(invocationCtx, toolDef))
 		case ToolName.PackageHealth:
 			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
+		case ToolName.Breakability:
+			m.mcpServer.AddTool(tool, m.snykBreakabilityHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
 		}
@@ -658,6 +664,115 @@ func (m *McpLLMBinding) snykPackageInfoHandler(invocationCtx workflow.Invocation
 			}
 			response = package_health.BuildPackageInfoResponseFromPackage(resp.ApplicationvndApiJSON200.Data.Attributes)
 		}
+
+		jsonBytes, err := json.Marshal(response)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to serialize response: %s", err.Error())), nil
+		}
+
+		return mcp.NewToolResultText(string(jsonBytes)), nil
+	}
+}
+
+func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.InvocationContext, toolDef SnykMcpToolsDefinition) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		logger := m.logger.With().Str("method", "snykBreakabilityHandler").Logger()
+		logger.Debug().Str("toolName", toolDef.Name).Msg("Received call for tool")
+
+		clientInfo := ClientInfoFromContext(ctx)
+		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
+
+		// Check authentication
+		user, whoAmiErr := authentication.CallWhoAmI(&logger, invocationCtx.GetEngine())
+		if whoAmiErr != nil || user == nil {
+			return mcp.NewToolResultText("User not authenticated. Please run 'snyk_auth' first"), nil
+		}
+
+		// Extract and validate arguments
+		args := request.GetArguments()
+
+		packageName, err := getRequiredStringArg(args, "package_name")
+		if err != nil {
+			return nil, err
+		}
+
+		packageFrom, err := getRequiredStringArg(args, "package_version_from")
+		if err != nil {
+			return nil, err
+		}
+
+		packageTo, err := getRequiredStringArg(args, "package_version_to")
+		if err != nil {
+			return nil, err
+		}
+		config := invocationCtx.GetEngine().GetConfiguration()
+		orgIdStr := config.GetString(configuration.ORGANIZATION)
+		if orgIdStr == "" {
+			return mcp.NewToolResultText("Error: Organization ID not configured. Please set an organization using 'snyk config set org=<org-id>'"), nil
+		}
+
+		orgId, err := uuid.Parse(orgIdStr)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Invalid organization ID format: %s", orgIdStr)), nil
+		}
+
+		endpoint, err := url.JoinPath(config.GetString(configuration.API_URL), "hidden")
+		if err != nil {
+			return nil, err
+		}
+
+		httpClient := invocationCtx.GetNetworkAccess().GetHttpClient()
+		apiClient, err := breakabilityapi.NewClientWithResponses(endpoint, breakabilityapi.WithHTTPClient(httpClient))
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to create breakability API client")
+			return mcp.NewToolResultText(fmt.Sprintf("Error: Failed to create API client: %s", err.Error())), nil
+		}
+
+		logger.Debug().Str("package", packageName).Str("from", packageFrom).Str("to", packageTo).Msg("Fetching breakability info")
+
+		const breakabilityApiVersion = "2024-10-15"
+
+		upgrades := []breakability.PackageUpgrade{
+			{
+				Name:        packageName,
+				FromVersion: packageFrom,
+				ToVersion:   packageTo,
+			},
+		}
+
+		reqBody := breakabilityapi.CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody{
+			Data: struct {
+				Attributes struct {
+					PackageUpgrades []breakabilityapi.Upgrade `json:"package_upgrades"`
+				} `json:"attributes"`
+				Type breakabilityapi.CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType `json:"type"`
+			}{
+				Type: breakabilityapi.Breakability,
+				Attributes: struct {
+					PackageUpgrades []breakabilityapi.Upgrade `json:"package_upgrades"`
+				}{
+					PackageUpgrades: breakability.ToAPIUpgrades(upgrades),
+				},
+			},
+		}
+
+		// We want the call to fail gracefully. Since the API isn't stable enough to handle load yet.
+		const breakabilityErrMsg = "no additional breakability context available"
+		resp, err := apiClient.CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBodyWithResponse(
+			ctx,
+			orgId,
+			&breakabilityapi.CreateBreakabilityAnalysisParams{Version: breakabilityApiVersion},
+			reqBody,
+		)
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to fetch breakability assessment")
+			return mcp.NewToolResultText(breakabilityErrMsg), nil
+		}
+		if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil {
+			return mcp.NewToolResultText(breakabilityErrMsg), nil
+		}
+
+		var response = breakability.BuildBreakabilityResponse(&resp.ApplicationvndApiJSON200.Data.Attributes)
 
 		jsonBytes, err := json.Marshal(response)
 		if err != nil {
