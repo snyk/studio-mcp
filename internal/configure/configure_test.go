@@ -728,7 +728,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		tempDir := t.TempDir()
 		configPath := filepath.Join(tempDir, "mcp.json")
 
-		snykCommand := "/Users/test/Library/Application Support/snyk/vscode-cli/snyk-macos-arm64"
+		snykCommand := "/usr/local/bin/snyk-macos-arm64"
 		config := map[string]interface{}{
 			"mcpServers": map[string]interface{}{
 				"Snyk": map[string]interface{}{
@@ -774,7 +774,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 					"args":    []string{"mcp", "-t", "stdio"},
 				},
 				"Snyk2": map[string]interface{}{
-					"command": "/Users/test2/Library/Application Support/snyk/vscode-cli/snyk-linux-x64",
+					"command": "/usr/local/bin/snyk-linux-x64",
 					"args":    []string{"mcp", "-t", "stdio"},
 				},
 			},
@@ -812,7 +812,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 			},
 			"mcpServers": map[string]interface{}{
 				"Snyk": map[string]interface{}{
-					"command": "/Users/test/Library/Application Support/snyk/vscode-cli/snyk-windows-x64",
+					"command": "/usr/local/bin/snyk-windows-x64",
 					"args":    []string{"mcp", "-t", "stdio"},
 				},
 			},
@@ -883,7 +883,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		tempDir := t.TempDir()
 		configPath := filepath.Join(tempDir, "mcp.json")
 
-		snykCommand := "/Users/test/Library/Application Support/snyk/vscode-cli/snyk-macos-arm64"
+		snykCommand := "/usr/local/bin/snyk-macos-arm64"
 		config := map[string]interface{}{
 			"mcpServers": map[string]interface{}{
 				"snyk": map[string]interface{}{

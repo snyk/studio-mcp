@@ -18,7 +18,7 @@ const (
 	RulesWorkspaceScope = "workspace"
 
 	// MCP server configuration
-	McpServerCommandPattern = "/snyk/vscode-cli/snyk-"
+	McpServerCommandPattern = "/snyk-"
 	McpServerStdioArg1 = "mcp"
 	McpServerStdioArg2 = "-t"
 	McpServerStdioArg3 = "stdio"
