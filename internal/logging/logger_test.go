@@ -13,63 +13,38 @@ package logging
 import (
 	"testing"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
-	"github.com/snyk/go-application-framework/pkg/configuration"
 	"github.com/stretchr/testify/assert"
 )
 
-func newTestConfig() configuration.Configuration {
-	return configuration.NewWithOpts()
+func newTestServer() *server.MCPServer {
+	return server.NewMCPServer("test", "1.0.0")
 }
 
-func TestResolveLogLevel_NilConfig_DefaultsToInfo(t *testing.T) {
-	assert.Equal(t, zerolog.InfoLevel, resolveLogLevel(nil))
+func TestConfigureLogging_NilOldLogger_DisablesLogging(t *testing.T) {
+	logger := ConfigureLogging(newTestServer(), nil)
+
+	assert.NotNil(t, logger)
+	assert.Equal(t, zerolog.Disabled, logger.GetLevel())
 }
 
-func TestResolveLogLevel_Default_IsInfo(t *testing.T) {
-	config := newTestConfig()
-	assert.Equal(t, zerolog.InfoLevel, resolveLogLevel(config))
-}
-
-func TestResolveLogLevel_LogLevelConfig_IsParsed(t *testing.T) {
-	cases := map[string]zerolog.Level{
-		"trace": zerolog.TraceLevel,
-		"debug": zerolog.DebugLevel,
-		"info":  zerolog.InfoLevel,
-		"warn":  zerolog.WarnLevel,
-		"error": zerolog.ErrorLevel,
+func TestConfigureLogging_InheritsLevelFromOldLogger(t *testing.T) {
+	cases := []zerolog.Level{
+		zerolog.TraceLevel,
+		zerolog.DebugLevel,
+		zerolog.InfoLevel,
+		zerolog.WarnLevel,
+		zerolog.ErrorLevel,
+		zerolog.Disabled,
 	}
-	for input, expected := range cases {
-		t.Run(input, func(t *testing.T) {
-			config := newTestConfig()
-			config.Set(configuration.LOG_LEVEL, input)
-			assert.Equal(t, expected, resolveLogLevel(config))
+	for _, level := range cases {
+		t.Run(level.String(), func(t *testing.T) {
+			oldLogger := zerolog.Nop().Level(level)
+			logger := ConfigureLogging(newTestServer(), &oldLogger)
+
+			assert.NotNil(t, logger)
+			assert.Equal(t, level, logger.GetLevel())
 		})
 	}
-}
-
-func TestResolveLogLevel_InvalidLogLevel_FallsBackToInfo(t *testing.T) {
-	config := newTestConfig()
-	config.Set(configuration.LOG_LEVEL, "not-a-level")
-	assert.Equal(t, zerolog.InfoLevel, resolveLogLevel(config))
-}
-
-func TestResolveLogLevel_DebugFlag_UsesDebugLevel(t *testing.T) {
-	config := newTestConfig()
-	config.Set(configuration.DEBUG, true)
-	assert.Equal(t, zerolog.DebugLevel, resolveLogLevel(config))
-}
-
-func TestResolveLogLevel_LogLevelTakesPrecedenceOverDebug(t *testing.T) {
-	config := newTestConfig()
-	config.Set(configuration.DEBUG, true)
-	config.Set(configuration.LOG_LEVEL, "trace")
-	assert.Equal(t, zerolog.TraceLevel, resolveLogLevel(config))
-}
-
-func TestResolveLogLevel_LogLevelTakesPrecedenceOverDebug_HigherLevel(t *testing.T) {
-	config := newTestConfig()
-	config.Set(configuration.DEBUG, true)
-	config.Set(configuration.LOG_LEVEL, "error")
-	assert.Equal(t, zerolog.ErrorLevel, resolveLogLevel(config))
 }
