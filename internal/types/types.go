@@ -52,6 +52,14 @@ type IssueData struct {
 	Message     string            `json:"message,omitempty"`
 	FingerPrint string            `json:"fingerPrint,omitempty"`
 	IsIgnored   bool              `json:"isIgnored,omitempty"`
+	// IsTransitiveDependency is set by SCA scans only. Pointer + omitempty
+	// preserves false in SCA payloads while keeping the key absent from non-SCA
+	// payloads.
+	IsTransitiveDependency *bool `json:"isTransitiveDependency,omitempty"`
+	// IntroducedThrough is the CLI dependency chain from the direct dependency
+	// to the vulnerable package: ordered from[1:] entries (project root
+	// excluded). Nil or empty omits the JSON key (omitempty).
+	IntroducedThrough []string `json:"introducedThrough,omitempty"`
 }
 
 var IssuesSeverity = map[string]Severity{

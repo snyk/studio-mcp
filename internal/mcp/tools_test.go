@@ -715,6 +715,46 @@ func TestGetSnykToolsConfig(t *testing.T) {
 	}
 }
 
+// TestSnykToolsJSONToolAnnotations ensures snyk_tools.json advertises
+// mimimum recommended MCP tool annotations.
+func TestSnykToolsJSONToolAnnotations(t *testing.T) {
+	var root struct {
+		Tools []json.RawMessage `json:"tools"`
+	}
+	err := json.Unmarshal([]byte(snykToolsJson), &root)
+	require.NoError(t, err, "embedded snyk_tools.json must be valid JSON")
+
+	requiredKeys := []string{
+		"readOnlyHint",
+		"destructiveHint",
+		"openWorldHint",
+		"idempotentHint",
+	}
+
+	for i, rawTool := range root.Tools {
+		var tool struct {
+			Name        string          `json:"name"`
+			Annotations json.RawMessage `json:"annotations"`
+		}
+		err = json.Unmarshal(rawTool, &tool)
+		require.NoError(t, err, "tool index %d", i)
+		require.NotEmpty(t, tool.Name, "tool index %d must have name", i)
+		require.NotEmpty(t, tool.Annotations, "tool %q must have a non-empty annotations object", tool.Name)
+
+		var ann map[string]json.RawMessage
+		err = json.Unmarshal(tool.Annotations, &ann)
+		require.NoError(t, err, "tool %q annotations must be a JSON object", tool.Name)
+
+		for _, key := range requiredKeys {
+			rawVal, ok := ann[key]
+			require.True(t, ok, "tool %q must include annotation %q", tool.Name, key)
+			var b bool
+			err = json.Unmarshal(rawVal, &b)
+			require.NoError(t, err, "tool %q annotation %q must be a JSON boolean", tool.Name, key)
+		}
+	}
+}
+
 func TestCreateToolFromDefinition(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -1904,6 +1944,8 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_sbom_scan",
 				"snyk_aibom",
 				"snyk_package_health_check",
+				"snyk_secret_scan",
+				"snyk_breakability_check",
 			},
 		},
 		{
@@ -1924,7 +1966,8 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_package_health_check",
 			},
 			unexpectedTools: []string{
-				"",
+				"snyk_secret_scan",
+				"snyk_breakability_check",
 			},
 		},
 		{
@@ -1943,6 +1986,8 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_sbom_scan",
 				"snyk_aibom",
 				"snyk_package_health_check",
+				"snyk_secret_scan",
+				"snyk_breakability_check",
 			},
 			unexpectedTools: []string{},
 		},
@@ -2038,7 +2083,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "":
+			case "snyk_secret_scan", "snyk_breakability_check":
 				// These should be experimental only
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
@@ -2049,4 +2094,350 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 			}
 		})
 	}
+}
+
+// breakabilityErrMsg mirrors the message returned by snykBreakabilityHandler
+// when the API call fails or returns an unexpected payload.
+const breakabilityErrMsg = "no additional breakability context available"
+
+// configureBreakabilityFixture wires the org id and API URL on the fixture so
+// the breakability handler can build a real HTTP request against the mock
+// server. testOrgID is a valid UUID accepted by uuid.Parse.
+func configureBreakabilityFixture(t *testing.T, fixture *testFixture, apiURL, orgID string) {
+	t.Helper()
+	config := fixture.invocationContext.GetConfiguration()
+	config.Set(configuration.ORGANIZATION, orgID)
+	config.Set(configuration.AUTHENTICATION_TOKEN, "test-token")
+	config.Set(configuration.API_URL, apiURL)
+}
+
+// startBreakabilityMockServer starts an httptest server that asserts the
+// request shape and responds with the supplied status/body.
+func startBreakabilityMockServer(t *testing.T, expectOrgID string, statusCode int, body interface{}, capturedBody *map[string]interface{}) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Contains(t, r.URL.Path, "/hidden/orgs/"+expectOrgID+"/breakability")
+		require.Equal(t, "2024-10-15", r.URL.Query().Get("version"))
+		require.Equal(t, "application/vnd.api+json", r.Header.Get("Content-Type"))
+
+		if capturedBody != nil {
+			require.NoError(t, json.NewDecoder(r.Body).Decode(capturedBody))
+		}
+
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		w.WriteHeader(statusCode)
+		if body != nil {
+			_ = json.NewEncoder(w).Encode(body)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestSnykBreakabilityHandler_ArgumentValidation(t *testing.T) {
+	fixture := setupTestFixture(t)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+	require.NotNil(t, toolDef, "snyk_breakability_check tool definition not found")
+	handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+	testCases := []struct {
+		name        string
+		args        map[string]interface{}
+		expectedErr string
+	}{
+		{
+			name:        "missing package_name",
+			args:        map[string]interface{}{"package_version_from": "1.0.0", "package_version_to": "2.0.0"},
+			expectedErr: "argument 'package_name' is required",
+		},
+		{
+			name:        "empty package_name",
+			args:        map[string]interface{}{"package_name": "", "package_version_from": "1.0.0", "package_version_to": "2.0.0"},
+			expectedErr: "argument 'package_name' must be a non-empty string",
+		},
+		{
+			name:        "missing package_version_from",
+			args:        map[string]interface{}{"package_name": "lodash", "package_version_to": "2.0.0"},
+			expectedErr: "argument 'package_version_from' is required",
+		},
+		{
+			name:        "missing package_version_to",
+			args:        map[string]interface{}{"package_name": "lodash", "package_version_from": "1.0.0"},
+			expectedErr: "argument 'package_version_to' is required",
+		},
+		{
+			name:        "wrong type package_name",
+			args:        map[string]interface{}{"package_name": 42, "package_version_from": "1.0.0", "package_version_to": "2.0.0"},
+			expectedErr: "argument 'package_name' must be a non-empty string",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: tc.args},
+			}
+
+			result, err := handler(t.Context(), req)
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			require.Contains(t, err.Error(), tc.expectedErr)
+		})
+	}
+}
+
+func TestSnykBreakabilityHandler_OrgIDValidation(t *testing.T) {
+	const validUUID = "11111111-1111-1111-1111-111111111111"
+
+	args := map[string]interface{}{
+		"package_name":         "lodash",
+		"package_version_from": "1.0.0",
+		"package_version_to":   "2.0.0",
+	}
+
+	t.Run("missing organization returns user-facing error", func(t *testing.T) {
+		fixture := setupTestFixture(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+		require.NotNil(t, toolDef)
+		fixture.invocationContext.GetConfiguration().Set(configuration.ORGANIZATION, "")
+		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+		result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		require.Contains(t, text.Text, "Organization ID not configured")
+	})
+
+	t.Run("non-UUID organization returns user-facing error", func(t *testing.T) {
+		fixture := setupTestFixture(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+		require.NotNil(t, toolDef)
+		fixture.invocationContext.GetConfiguration().Set(configuration.ORGANIZATION, "not-a-uuid")
+		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+		result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		require.Contains(t, text.Text, "Invalid organization ID format")
+	})
+
+	t.Run("valid UUID is accepted (though API call fails gracefully)", func(t *testing.T) {
+		fixture := setupTestFixture(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+		require.NotNil(t, toolDef)
+		// API_URL points to an unreachable host so the API call fails.
+		configureBreakabilityFixture(t, fixture, "http://127.0.0.1:1", validUUID)
+		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+		result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		require.Equal(t, breakabilityErrMsg, text.Text)
+	})
+}
+
+func TestSnykBreakabilityHandler_SuccessfulResponse(t *testing.T) {
+	const orgID = "22222222-2222-2222-2222-222222222222"
+
+	testCases := []struct {
+		name                 string
+		riskLevel            string
+		summary              string
+		expectedRiskLevel    string
+		expectedInstructions string
+	}{
+		{
+			name:                 "high risk surfaces breaking change instructions",
+			riskLevel:            "high",
+			summary:              "Removed deprecated API",
+			expectedRiskLevel:    "high",
+			expectedInstructions: "IMPORTANT: Breaking change detected.",
+		},
+		{
+			name:                 "medium risk surfaces ambiguous instructions",
+			riskLevel:            "medium",
+			summary:              "Signature changed",
+			expectedRiskLevel:    "medium",
+			expectedInstructions: "Check the assessment",
+		},
+		{
+			name:                 "low risk surfaces non-breaking instructions",
+			riskLevel:            "low",
+			summary:              "Patch only",
+			expectedRiskLevel:    "low",
+			expectedInstructions: "Non-breaking change",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := setupTestFixture(t)
+			toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+			require.NotNil(t, toolDef)
+
+			capturedBody := map[string]interface{}{}
+			respBody := map[string]interface{}{
+				"jsonapi": map[string]interface{}{"version": "1.0"},
+				"data": map[string]interface{}{
+					"id":   "33333333-3333-3333-3333-333333333333",
+					"type": "breakability",
+					"attributes": map[string]interface{}{
+						"risk_level": tc.riskLevel,
+						"summary":    tc.summary,
+					},
+				},
+			}
+			apiURL := startBreakabilityMockServer(t, orgID, http.StatusOK, respBody, &capturedBody)
+			configureBreakabilityFixture(t, fixture, apiURL, orgID)
+
+			handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+			req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+				"package_name":         "express",
+				"package_version_from": "4.18.0",
+				"package_version_to":   "5.0.0",
+			}}}
+
+			result, err := handler(t.Context(), req)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			text, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+
+			var payload map[string]interface{}
+			require.NoError(t, json.Unmarshal([]byte(text.Text), &payload))
+			require.Equal(t, tc.expectedRiskLevel, payload["risk_level"])
+			require.Equal(t, tc.summary, payload["assessment"])
+			require.Contains(t, payload["instructions"], tc.expectedInstructions)
+
+			// Verify the request body includes the upgrade exactly once.
+			data, _ := capturedBody["data"].(map[string]interface{})
+			require.NotNil(t, data, "expected data field in request body")
+			require.Equal(t, "breakability", data["type"])
+			attrs, _ := data["attributes"].(map[string]interface{})
+			require.NotNil(t, attrs)
+			upgrades, _ := attrs["package_upgrades"].([]interface{})
+			require.Len(t, upgrades, 1)
+			upgrade, _ := upgrades[0].(map[string]interface{})
+			require.Equal(t, "express", upgrade["name"])
+			require.Equal(t, "4.18.0", upgrade["from_version"])
+			require.Equal(t, "5.0.0", upgrade["to_version"])
+		})
+	}
+}
+
+func TestSnykBreakabilityHandler_GracefulFailure(t *testing.T) {
+	const orgID = "44444444-4444-4444-4444-444444444444"
+
+	args := map[string]interface{}{
+		"package_name":         "lodash",
+		"package_version_from": "4.17.10",
+		"package_version_to":   "4.17.21",
+	}
+
+	t.Run("API returns 200 but data is missing", func(t *testing.T) {
+		fixture := setupTestFixture(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+		require.NotNil(t, toolDef)
+
+		respBody := map[string]interface{}{
+			"jsonapi": map[string]interface{}{"version": "1.0"},
+		}
+		apiURL := startBreakabilityMockServer(t, orgID, http.StatusOK, respBody, nil)
+		configureBreakabilityFixture(t, fixture, apiURL, orgID)
+
+		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+		result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		require.Equal(t, breakabilityErrMsg, text.Text)
+	})
+
+	t.Run("API returns 500 server error", func(t *testing.T) {
+		fixture := setupTestFixture(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+		require.NotNil(t, toolDef)
+
+		respBody := map[string]interface{}{
+			"jsonapi": map[string]interface{}{"version": "1.0"},
+			"errors": []interface{}{map[string]interface{}{"status": "500", "detail": "boom"}},
+		}
+		apiURL := startBreakabilityMockServer(t, orgID, http.StatusInternalServerError, respBody, nil)
+		configureBreakabilityFixture(t, fixture, apiURL, orgID)
+
+		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+		result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		require.Equal(t, breakabilityErrMsg, text.Text)
+	})
+}
+
+func TestSnykBreakabilityHandler_Unauthenticated(t *testing.T) {
+	// When WhoAmI fails, the handler should bail out with a friendly auth message.
+	engine, engineConfig := SetupEngineMock(t)
+	logger := zerolog.New(io.Discard)
+	mockctl := gomock.NewController(t)
+
+	storage := mocks.NewMockStorage(mockctl)
+	engineConfig.SetStorage(storage)
+
+	invocationCtx := mocks.NewMockInvocationContext(mockctl)
+	invocationCtx.EXPECT().GetConfiguration().Return(engineConfig).AnyTimes()
+	invocationCtx.EXPECT().GetEnhancedLogger().Return(&logger).AnyTimes()
+	invocationCtx.EXPECT().GetRuntimeInfo().Return(runtimeinfo.New(runtimeinfo.WithName("hurz"), runtimeinfo.WithVersion("1000.8.3"))).AnyTimes()
+	invocationCtx.EXPECT().GetEngine().Return(engine).AnyTimes()
+
+	mockNetworkAccess := mocks.NewMockNetworkAccess(mockctl)
+	mockNetworkAccess.EXPECT().RemoveHeaderField("User-Agent").AnyTimes()
+	mockNetworkAccess.EXPECT().AddHeaderField("User-Agent", gomock.Any()).AnyTimes()
+	mockNetworkAccess.EXPECT().GetHttpClient().Return(&http.Client{}).AnyTimes()
+	invocationCtx.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+	engine.EXPECT().GetNetworkAccess().Return(mockNetworkAccess).AnyTimes()
+
+	// Force WhoAmI to return an error.
+	engine.EXPECT().InvokeWithConfig(localworkflows.WORKFLOWID_WHOAMI, gomock.Any()).Return(nil, fmt.Errorf("unauthorized")).AnyTimes()
+
+	binding := NewMcpLLMBinding(WithCliPath("/no/such/path"), WithLogger(&logger))
+	binding.folderTrust = trust.NewFolderTrust(&logger, engineConfig)
+	binding.mcpServer = server.NewMCPServer("Snyk", "1.1.1")
+
+	tools, err := loadMcpToolsFromJson()
+	require.NoError(t, err)
+	toolDef := getToolWithName(t, tools, ToolName.Breakability)
+	require.NotNil(t, toolDef)
+
+	handler := binding.snykBreakabilityHandler(invocationCtx, *toolDef)
+
+	result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+		"package_name":         "lodash",
+		"package_version_from": "1.0.0",
+		"package_version_to":   "2.0.0",
+	}}})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	require.Contains(t, text.Text, "User not authenticated")
 }

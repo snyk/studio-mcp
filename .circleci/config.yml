@@ -1,7 +1,16 @@
 version: 2.1
 
 orbs:
+  go: snyk/go@1.0.0
   prodsec: snyk/prodsec-orb@1
+
+commands:
+  go_mod_download:
+    description: Go modules cache with private modules handling
+    steps:
+      - go/mod-download-cached:
+          basic-auth-secret: GITHUB_PRIVATE_TOKEN
+          module-path: github.com/snyk
 
 jobs:
   security-scans:
@@ -10,6 +19,7 @@ jobs:
       - image: cimg/go:1.21
     steps:
       - checkout
+      - go_mod_download
       - prodsec/security_scans:
           mode: auto
           open-source-additional-arguments: --exclude=testdata
