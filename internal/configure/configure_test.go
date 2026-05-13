@@ -309,6 +309,67 @@ func TestEnsureMcpServerInJson(t *testing.T) {
 		assert.Equal(t, "/other/cli", config.McpServers["OtherServer"].Command)
 	})
 
+	t.Run("coexists with SnykAlphaPatch by identifying SAI server by command and args", func(t *testing.T) {
+		isolatedPath := filepath.Join(t.TempDir(), "mcp.json")
+		alphaPatch := McpServer{
+			Command: "npx",
+			Args:    []string{"-y", "@example/alphapatch-mcp"},
+			Env:     shared.McpEnvMap{"ALPHA": "keep"},
+		}
+		cfg := McpConfig{
+			McpServers: map[string]McpServer{
+				"SnykAlphaPatch": alphaPatch,
+			},
+		}
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(isolatedPath, data, 0644))
+
+		snykCliCommand := "/path/to/snyk-cli"
+		err = ensureMcpServerInJson(isolatedPath, "Snyk", snykCliCommand, []string{"mcp", "-t", "stdio"}, env, logger)
+		require.NoError(t, err)
+
+		out, err := os.ReadFile(isolatedPath)
+		require.NoError(t, err)
+		var parsed McpConfig
+		require.NoError(t, json.Unmarshal(out, &parsed))
+
+		assert.Equal(t, alphaPatch, parsed.McpServers["SnykAlphaPatch"], "SnykAlphaPatch entry must not be modified")
+		require.Contains(t, parsed.McpServers, "Snyk")
+		assert.Equal(t, snykCliCommand, parsed.McpServers["Snyk"].Command)
+		assert.Equal(t, []string{"mcp", "-t", "stdio"}, parsed.McpServers["Snyk"].Args)
+	})
+
+	t.Run("updates existing SAI MCP server by matching command and args", func(t *testing.T) {
+		isolatedPath := filepath.Join(t.TempDir(), "mcp.json")
+		snykCommand := "/path/to/snyk-cli"
+		cfg := McpConfig{
+			McpServers: map[string]McpServer{
+				"OldSnykName": McpServer{
+					Command: snykCommand,
+					Args:    []string{"mcp", "-t", "stdio"},
+					Env:     shared.McpEnvMap{"SNYK_CFG_ORG": "old-org"},
+				},
+			},
+		}
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(isolatedPath, data, 0644))
+
+		newEnv := shared.McpEnvMap{"SNYK_CFG_ORG": "new-org"}
+		err = ensureMcpServerInJson(isolatedPath, "Snyk", snykCommand, []string{"mcp", "-t", "stdio"}, newEnv, logger)
+		require.NoError(t, err)
+
+		out, err := os.ReadFile(isolatedPath)
+		require.NoError(t, err)
+		var parsed McpConfig
+		require.NoError(t, json.Unmarshal(out, &parsed))
+
+		require.Contains(t, parsed.McpServers, "OldSnykName")
+		assert.Equal(t, snykCommand, parsed.McpServers["OldSnykName"].Command)
+		assert.Equal(t, []string{"mcp", "-t", "stdio"}, parsed.McpServers["OldSnykName"].Args)
+	})
+
 	t.Run("preserves other root-level JSON fields", func(t *testing.T) {
 		// Create a config file with additional root-level fields
 		configWithOtherFields := map[string]interface{}{
@@ -663,15 +724,15 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 	nopLogger := zerolog.New(io.Discard)
 	logger := &nopLogger
 
-	t.Run("removes server from config", func(t *testing.T) {
+	t.Run("removes server by matching command and args", func(t *testing.T) {
 		tempDir := t.TempDir()
 		configPath := filepath.Join(tempDir, "mcp.json")
 
-		// Create a config with Snyk server
+		snykCommand := "/usr/local/bin/snyk-macos-arm64"
 		config := map[string]interface{}{
 			"mcpServers": map[string]interface{}{
 				"Snyk": map[string]interface{}{
-					"command": "/path/to/cli",
+					"command": snykCommand,
 					"args":    []string{"mcp", "-t", "stdio"},
 				},
 				"OtherServer": map[string]interface{}{
@@ -685,7 +746,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		err = os.WriteFile(configPath, data, 0644)
 		require.NoError(t, err)
 
-		// Remove Snyk server
+		// Remove Snyk server by its command/args signature
 		err = removeMcpServerFromJson(configPath, "Snyk", logger)
 		require.NoError(t, err)
 
@@ -702,11 +763,48 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		assert.Contains(t, mcpServers, "OtherServer")
 	})
 
+	t.Run("does not remove when multiple SAI servers exist", func(t *testing.T) {
+		tempDir := t.TempDir()
+		configPath := filepath.Join(tempDir, "mcp.json")
+
+		config := map[string]interface{}{
+			"mcpServers": map[string]interface{}{
+				"Snyk1": map[string]interface{}{
+					"command": "/Users/test1/Library/Application Support/snyk/vscode-cli/snyk-macos-arm64",
+					"args":    []string{"mcp", "-t", "stdio"},
+				},
+				"Snyk2": map[string]interface{}{
+					"command": "/usr/local/bin/snyk-linux-x64",
+					"args":    []string{"mcp", "-t", "stdio"},
+				},
+			},
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		require.NoError(t, err)
+		err = os.WriteFile(configPath, data, 0644)
+		require.NoError(t, err)
+
+		// Try to remove - should not remove anything since multiple SAI servers exist
+		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		require.NoError(t, err)
+
+		// Verify both servers still exist
+		data, err = os.ReadFile(configPath)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+
+		mcpServers := result["mcpServers"].(map[string]interface{})
+		assert.Contains(t, mcpServers, "Snyk1")
+		assert.Contains(t, mcpServers, "Snyk2")
+	})
+
 	t.Run("preserves other root-level fields", func(t *testing.T) {
 		tempDir := t.TempDir()
 		configPath := filepath.Join(tempDir, "mcp.json")
 
-		// Create a config with additional fields
 		config := map[string]interface{}{
 			"customField": "customValue",
 			"settings": map[string]interface{}{
@@ -714,7 +812,8 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 			},
 			"mcpServers": map[string]interface{}{
 				"Snyk": map[string]interface{}{
-					"command": "/path/to/cli",
+					"command": "/usr/local/bin/snyk-windows-x64",
+					"args":    []string{"mcp", "-t", "stdio"},
 				},
 			},
 		}
@@ -780,15 +879,16 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		assert.Contains(t, mcpServers, "OtherServer")
 	})
 
-	t.Run("case-insensitive server key matching", func(t *testing.T) {
+	t.Run("identifies SAI server regardless of key case", func(t *testing.T) {
 		tempDir := t.TempDir()
 		configPath := filepath.Join(tempDir, "mcp.json")
 
-		// Create a config with lowercase "snyk" server
+		snykCommand := "/usr/local/bin/snyk-macos-arm64"
 		config := map[string]interface{}{
 			"mcpServers": map[string]interface{}{
 				"snyk": map[string]interface{}{
-					"command": "/path/to/cli",
+					"command": snykCommand,
+					"args":    []string{"mcp", "-t", "stdio"},
 				},
 			},
 		}
@@ -797,7 +897,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		err = os.WriteFile(configPath, data, 0644)
 		require.NoError(t, err)
 
-		// Remove using "Snyk" (different case)
+		// Remove using "Snyk" (different case) - should find and remove the lowercase "snyk" key
 		err = removeMcpServerFromJson(configPath, "Snyk", logger)
 		require.NoError(t, err)
 
@@ -810,8 +910,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		require.NoError(t, err)
 
 		mcpServers := result["mcpServers"].(map[string]interface{})
-		assert.NotContains(t, mcpServers, "snyk")
-		assert.NotContains(t, mcpServers, "Snyk")
+		assert.Empty(t, mcpServers, "snyk server should be removed regardless of case")
 	})
 }
 

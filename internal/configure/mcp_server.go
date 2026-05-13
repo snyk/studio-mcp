@@ -24,6 +24,8 @@ type McpConfig struct {
 
 // ensureMcpServerInJson creates or updates MCP server configuration in a JSON file
 // This function preserves all other fields in the JSON file
+// It identifies the SAI MCP server by its command and args rather than by name,
+// allowing it to coexist with other MCP servers like SnykAlphaPatch
 func ensureMcpServerInJson(filePath, serverKey, command string, args []string, env shared.McpEnvMap, logger *zerolog.Logger) error {
 	// Use a generic map to preserve all existing fields
 	var config map[string]interface{}
@@ -57,8 +59,13 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 		mcpServers = make(map[string]interface{})
 	}
 
-	// Find matching server key (case-insensitive)
-	keyToUse := findServerKeyInGenericMap(mcpServers, serverKey)
+	// Find existing SAI MCP server by command and args
+	keyToUse := findServerByCommandAndArgs(mcpServers, command, args)
+
+	// If not found by command/args, use the server key name (creates new entry)
+	if keyToUse == "" {
+		keyToUse = serverKey
+	}
 
 	// Get existing server as a generic map to preserve all properties
 	var existingServerMap map[string]interface{}
@@ -127,6 +134,9 @@ func ensureMcpServerInJson(filePath, serverKey, command string, args []string, e
 }
 
 // removeMcpServerFromJson removes an MCP server from the configuration JSON file
+// This function identifies the SAI MCP server by its command and args.
+// It only removes if exactly one server with the matching command and args is found.
+// If multiple servers match or none match, nothing is removed.
 // This function preserves all other fields in the JSON file
 func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger) error {
 	// Check if file exists
@@ -159,14 +169,21 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 		return nil
 	}
 
-	// Find matching server key (case-insensitive)
-	keyToRemove := findServerKeyInGenericMap(mcpServers, serverKey)
+	// Look for any server where command contains McpServerCommand and args are ["mcp", "-t", "stdio"]
+	expectedArgs := []string{shared.McpServerStdioArg1, shared.McpServerStdioArg2, shared.McpServerStdioArg3}
+	matchingKeys := findMatchingServerKeys(mcpServers, expectedArgs, 2)
 
-	// Check if server exists
-	if _, exists := mcpServers[keyToRemove]; !exists {
-		logger.Debug().Msgf("Server '%s' not found in config, nothing to remove", serverKey)
+	// Only remove if exactly one matching server is found
+	if len(matchingKeys) == 0 {
 		return nil
 	}
+	
+	if len(matchingKeys) > 1 {
+		logger.Debug().Msgf("Found %d servers with command containing 'snyk' and args matching SAI MCP, not removing (expected exactly 1)", len(matchingKeys))
+		return nil
+	}
+
+	keyToRemove := matchingKeys[0]
 
 	// Remove the server
 	delete(mcpServers, keyToRemove)
@@ -185,16 +202,73 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 	return nil
 }
 
-// findServerKeyInGenericMap finds the matching server key in a generic map (case-insensitive)
-func findServerKeyInGenericMap(servers map[string]interface{}, serverKey string) string {
-	serverKeyLower := strings.ToLower(serverKey)
-	for key := range servers {
-		keyLower := strings.ToLower(key)
-		if keyLower == serverKeyLower || strings.Contains(keyLower, serverKeyLower) {
-			return key
+// findServerByCommandAndArgs finds the first server key that matches the SAI MCP server's command and args.
+// Returns empty string if no match is found.
+func findServerByCommandAndArgs(servers map[string]interface{}, command string, args []string) string {
+	matchingKeys := findMatchingServerKeys(servers, args, 1)
+	if len(matchingKeys) == 0 {
+		return ""
+	}
+	return matchingKeys[0]
+}
+
+// findMatchingServerKeys finds all server keys that match the SAI MCP server's args and command, returning up to maxResultCount results.
+func findMatchingServerKeys(servers map[string]interface{}, expectedArgs []string, maxResultCount int) []string {
+	var matchingKeys []string
+
+	for key, serverConfig := range servers {
+		if len(matchingKeys) >= maxResultCount {
+			break
+		}
+
+		serverConfigFields, ok := serverConfig.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// check if args key exists, and has the same args as SAI MCP server's args
+		argsVal, argsExists := serverConfigFields["args"].([]interface{})
+		if !argsExists {
+			continue
+		}
+
+		if !argsMatch(argsVal, expectedArgs) {
+			continue
+		}
+
+		// check if command key exists, and is the same command as SAI MCP server's command
+		cmdVal, cmdExists := serverConfigFields["command"].(string)
+		if !cmdExists || cmdVal == "" {
+			continue
+		}
+
+		if !matchesSnykCommand(cmdVal) {
+			continue
+		}
+
+		matchingKeys = append(matchingKeys, key)
+	}
+
+	return matchingKeys
+}
+
+// argsMatch checks if two argument lists are equal
+func argsMatch(ifaceArgs []interface{}, stringArgs []string) bool {
+	if ifaceArgs == nil || stringArgs == nil {
+		return (ifaceArgs == nil) && (stringArgs == nil)
+	}
+
+	if len(ifaceArgs) != len(stringArgs) {
+		return false
+	}
+
+	for i, arg := range ifaceArgs {
+		str, ok := arg.(string)
+		if !ok || str != stringArgs[i] {
+			return false
 		}
 	}
-	return serverKey
+	return true
 }
 
 // mergeEnv merges environment variables, overriding Snyk-specific keys
@@ -210,4 +284,12 @@ func mergeEnv(existing, new shared.McpEnvMap) shared.McpEnvMap {
 	}
 
 	return resultingEnv
+}
+
+// matchesSnykCommand checks if the given command path matches the expected SAI MCP server's command pattern
+// normalizes path separators and performs case-insensitive comparison
+func matchesSnykCommand(command string) bool {
+	normalizedCommand := strings.ToLower(filepath.ToSlash(command))
+	normalizedCommandPattern := strings.ToLower(shared.McpServerCommandPattern)
+	return strings.Contains(normalizedCommand, normalizedCommandPattern)
 }
