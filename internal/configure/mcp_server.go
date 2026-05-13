@@ -202,7 +202,7 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 	return nil
 }
 
-// findServerByCommandAndArgs finds the first server key that matches the given command and args.
+// findServerByCommandAndArgs finds the first server key that matches the SAI MCP server's command and args.
 // Returns empty string if no match is found.
 func findServerByCommandAndArgs(servers map[string]interface{}, command string, args []string) string {
 	matchingKeys := findMatchingServerKeys(servers, args, 1)
@@ -212,21 +212,22 @@ func findServerByCommandAndArgs(servers map[string]interface{}, command string, 
 	return matchingKeys[0]
 }
 
-// findMatchingServerKeys finds all server keys that match the given args and command, returning up to maxResultCount results.
+// findMatchingServerKeys finds all server keys that match the SAI MCP server's args and command, returning up to maxResultCount results.
 func findMatchingServerKeys(servers map[string]interface{}, expectedArgs []string, maxResultCount int) []string {
 	var matchingKeys []string
 
-	for key, serverRaw := range servers {
+	for key, serverConfig := range servers {
 		if len(matchingKeys) >= maxResultCount {
 			break
 		}
 
-		serverMap, ok := serverRaw.(map[string]interface{})
+		serverConfigFields, ok := serverConfig.(map[string]interface{})
 		if !ok {
 			continue
 		}
 
-		argsVal, argsExists := serverMap["args"].([]interface{})
+		// check if args key exists, and has the same args as SAI MCP server's args
+		argsVal, argsExists := serverConfigFields["args"].([]interface{})
 		if !argsExists {
 			continue
 		}
@@ -235,12 +236,13 @@ func findMatchingServerKeys(servers map[string]interface{}, expectedArgs []strin
 			continue
 		}
 
-		cmdVal, cmdExists := serverMap["command"].(string)
+		// check if command key exists, and is the same command as SAI MCP server's command
+		cmdVal, cmdExists := serverConfigFields["command"].(string)
 		if !cmdExists || cmdVal == "" {
 			continue
 		}
 
-		if !strings.Contains(strings.ToLower(cmdVal), strings.ToLower(shared.McpServerCommand)) {
+		if !matchesSnykCommand(cmdVal) {
 			continue
 		}
 
@@ -282,4 +284,12 @@ func mergeEnv(existing, new shared.McpEnvMap) shared.McpEnvMap {
 	}
 
 	return resultingEnv
+}
+
+// matchesSnykCommand checks if the given command path matches the expected SAI MCP server's command pattern
+// normalizes path separators and performs case-insensitive comparison
+func matchesSnykCommand(command string) bool {
+	normalizedCommand := strings.ToLower(filepath.ToSlash(command))
+	normalizedCommandPattern := strings.ToLower(shared.McpServerCommandPattern)
+	return strings.Contains(normalizedCommand, normalizedCommandPattern)
 }
