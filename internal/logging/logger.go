@@ -26,6 +26,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
+	"github.com/snyk/go-application-framework/pkg/configuration"
 	frameworkLogging "github.com/snyk/go-application-framework/pkg/logging"
 )
 
@@ -117,14 +118,24 @@ func getConsoleWriter(writer io.Writer) zerolog.ConsoleWriter {
 	return w
 }
 
-func ConfigureLogging(server *server.MCPServer) *zerolog.Logger {
-	logLevel := zerolog.InfoLevel
+func resolveLogLevel(config configuration.Configuration) zerolog.Level {
+	if config != nil {
+		if cfgLogLevel := config.GetString(configuration.LOG_LEVEL); cfgLogLevel != "" {
+			if cfgLevel, err := zerolog.ParseLevel(cfgLogLevel); err == nil {
+				return cfgLevel
+			}
+		}
 
-	if envLogLevel := os.Getenv("SNYK_LOG_LEVEL"); envLogLevel != "" {
-		if envLevel, err := zerolog.ParseLevel(envLogLevel); err == nil {
-			logLevel = envLevel
+		if config.GetBool(configuration.DEBUG) {
+			return zerolog.DebugLevel
 		}
 	}
+
+	return zerolog.InfoLevel
+}
+
+func ConfigureLogging(server *server.MCPServer, config configuration.Configuration) *zerolog.Logger {
+	logLevel := resolveLogLevel(config)
 
 	var rawWriters []io.Writer
 
