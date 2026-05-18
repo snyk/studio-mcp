@@ -117,16 +117,14 @@ func getConsoleWriter(writer io.Writer) zerolog.ConsoleWriter {
 	return w
 }
 
-func ConfigureLogging(server *server.MCPServer) *zerolog.Logger {
-	logLevel := zerolog.InfoLevel
-
-	if envLogLevel := os.Getenv("SNYK_LOG_LEVEL"); envLogLevel != "" {
-		if envLevel, err := zerolog.ParseLevel(envLogLevel); err == nil {
-			logLevel = envLevel
-		}
-	}
-
+func ConfigureLogging(server *server.MCPServer, oldLogger *zerolog.Logger) *zerolog.Logger {
 	var rawWriters []io.Writer
+
+	logLevel := zerolog.Disabled
+
+	if oldLogger != nil {
+		logLevel = oldLogger.GetLevel()
+	}
 
 	mcpLevelWriter := New(server)
 	rawWriters = append(rawWriters, mcpLevelWriter)
