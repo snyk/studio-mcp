@@ -95,7 +95,8 @@ func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) erro
 		server.WithPromptCapabilities(true),
 	)
 
-	m.logger = logging.ConfigureLogging(m.mcpServer)
+	oldLogger := invocationContext.GetEngine().GetLogger()
+	m.logger = logging.ConfigureLogging(m.mcpServer, oldLogger)
 	invocationContext.GetEngine().SetLogger(m.logger)
 
 	m.folderTrust = trust.NewFolderTrust(m.logger, invocationContext.GetConfiguration())
