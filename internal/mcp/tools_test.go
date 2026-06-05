@@ -17,6 +17,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1728,6 +1729,134 @@ func TestSnykTrustHandler(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, result)
 		require.Contains(t, err.Error(), "empty path given to tool snyk_trust")
+	})
+}
+
+func TestSnykSendFeedbackHandler_Validation(t *testing.T) {
+	fixture := setupTestFixture(t)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+	require.NotNil(t, toolDef, "snyk_send_feedback tool definition not found")
+
+	handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+	t.Run("MissingPreventedIssuesCount", func(t *testing.T) {
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"fixedExistingIssuesCount": float64(0),
+			"path":                     "/tmp",
+		}}}
+		result, err := handler(t.Context(), req)
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.Contains(t, err.Error(), "preventedIssuesCount")
+	})
+
+	t.Run("MissingFixedExistingIssuesCount", func(t *testing.T) {
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount": float64(1),
+			"path":                 "/tmp",
+		}}}
+		result, err := handler(t.Context(), req)
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.Contains(t, err.Error(), "fixedExistingIssuesCount")
+	})
+
+	t.Run("MissingPath", func(t *testing.T) {
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(1),
+			"fixedExistingIssuesCount": float64(0),
+		}}}
+		result, err := handler(t.Context(), req)
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.Contains(t, err.Error(), "'path' is missing")
+	})
+
+	t.Run("EmptyPath", func(t *testing.T) {
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(1),
+			"fixedExistingIssuesCount": float64(0),
+			"path":                     "",
+		}}}
+		result, err := handler(t.Context(), req)
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.Contains(t, err.Error(), "empty path")
+	})
+
+	t.Run("BothCountsZeroReturnsEarly", func(t *testing.T) {
+		// Both counts zero short-circuits before any analytics dispatch, so this
+		// is the success path safe to exercise without mocking the analytics workflow.
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(0),
+			"fixedExistingIssuesCount": float64(0),
+			"path":                     "/tmp",
+			"preventedIssueIds":        []any{"sast:ignored"},
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	})
+}
+
+func TestCoerceStringSlice(t *testing.T) {
+	t.Run("NilInput", func(t *testing.T) {
+		require.Nil(t, coerceStringSlice(nil))
+	})
+
+	t.Run("NonSliceInput", func(t *testing.T) {
+		require.Nil(t, coerceStringSlice("not a slice"))
+		require.Nil(t, coerceStringSlice(42))
+	})
+
+	t.Run("EmptySlice", func(t *testing.T) {
+		got := coerceStringSlice([]any{})
+		require.NotNil(t, got)
+		require.Len(t, got, 0)
+	})
+
+	t.Run("AllStrings", func(t *testing.T) {
+		got := coerceStringSlice([]any{"a", "b", "c"})
+		require.Equal(t, []string{"a", "b", "c"}, got)
+	})
+
+	t.Run("MixedTypesDropsNonStrings", func(t *testing.T) {
+		got := coerceStringSlice([]any{"a", 1, "b", true, "c"})
+		require.Equal(t, []string{"a", "b", "c"}, got)
+	})
+}
+
+func TestBuildSendFeedbackExtension(t *testing.T) {
+	t.Run("CountsOnlyNoIDs", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, 2, 1, nil)
+		require.Equal(t, 2, ext["mcp::preventedIssuesCount"])
+		require.Equal(t, 1, ext["mcp::remediatedIssuesCount"])
+		_, hasIDs := ext["mcp::preventedIssueIds"]
+		require.False(t, hasIDs, "preventedIssueIds key must be omitted when no IDs provided")
+	})
+
+	t.Run("WithMatchingIDs", func(t *testing.T) {
+		ids := []string{"sast:javascript/SqlInjection", "sca:SNYK-JS-LODASH-1234567"}
+		var buf bytes.Buffer
+		logger := zerolog.New(&buf)
+		ext := buildSendFeedbackExtension(&logger, 2, 0, ids)
+		require.Equal(t, ids, ext["mcp::preventedIssueIds"])
+		require.Empty(t, buf.String(), "no warning expected when length matches count")
+	})
+
+	t.Run("CountMismatchLogsWarningButIncludesIDs", func(t *testing.T) {
+		ids := []string{"sast:a", "sast:b"}
+		var buf bytes.Buffer
+		logger := zerolog.New(&buf)
+		ext := buildSendFeedbackExtension(&logger, 3, 0, ids)
+		require.Equal(t, ids, ext["mcp::preventedIssueIds"])
+		require.Contains(t, buf.String(), "does not match")
+	})
+
+	t.Run("EmptyIDsSliceOmittedFromExtension", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, 0, 0, []string{})
+		_, hasIDs := ext["mcp::preventedIssueIds"]
+		require.False(t, hasIDs)
 	})
 }
 

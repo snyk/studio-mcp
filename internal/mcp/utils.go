@@ -107,6 +107,15 @@ func createToolFromDefinition(toolDef *SnykMcpToolsDefinition) mcp.Tool {
 			} else {
 				opts = append(opts, mcp.WithNumber(param.Name, mcp.Description(param.Description)))
 			}
+		case "array":
+			propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
+			if param.Items != nil {
+				propOpts = append(propOpts, mcp.Items(param.Items))
+			}
+			if param.IsRequired {
+				propOpts = append(propOpts, mcp.Required())
+			}
+			opts = append(opts, mcp.WithArray(param.Name, propOpts...))
 		}
 	}
 
