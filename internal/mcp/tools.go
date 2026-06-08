@@ -104,13 +104,14 @@ type SnykMcpToolsDefinition struct {
 }
 
 type SnykMcpToolParameter struct {
-	Name             string   `json:"name"`
-	Type             string   `json:"type"`
-	IsRequired       bool     `json:"isRequired"`
-	Description      string   `json:"description"`
-	SupersedesParams []string `json:"supersedesParams"`
-	IsPositional     bool     `json:"isPositional"`
-	Position         int      `json:"position"`
+	Name             string         `json:"name"`
+	Type             string         `json:"type"`
+	Items            map[string]any `json:"items,omitempty"`
+	IsRequired       bool           `json:"isRequired"`
+	Description      string         `json:"description"`
+	SupersedesParams []string       `json:"supersedesParams"`
+	IsPositional     bool           `json:"isPositional"`
+	Position         int            `json:"position"`
 }
 
 //go:embed snyk_tools.json
@@ -484,18 +485,17 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 		logger := m.logger.With().Str("method", toolDef.Name).Logger()
 		logger.Debug().Str("toolName", toolDef.Name).Msg("Received call for tool")
 
-		preventedCountStr := request.GetArguments()["preventedIssuesCount"]
-		remediatedCountStr := request.GetArguments()["fixedExistingIssuesCount"]
+		args := request.GetArguments()
 
-		preventedCount, ok := preventedCountStr.(float64)
+		preventedCount, ok := args["preventedIssuesCount"].(float64)
 		if !ok {
 			return nil, fmt.Errorf("invalid argument preventedIssuesCount")
 		}
-		remediatedCount, ok := remediatedCountStr.(float64)
+		remediatedCount, ok := args["fixedExistingIssuesCount"].(float64)
 		if !ok {
 			return nil, fmt.Errorf("invalid argument fixedExistingIssuesCount")
 		}
-		pathArg := request.GetArguments()["path"]
+		pathArg := args["path"]
 		if pathArg == nil {
 			return nil, fmt.Errorf("argument 'path' is missing for tool %s", toolDef.Name)
 		}
@@ -507,6 +507,8 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 			return nil, fmt.Errorf("empty path given to tool %s", toolDef.Name)
 		}
 
+		preventedIDs := coerceStringSlice(args["preventedIssueIds"])
+
 		if preventedCount == 0 && remediatedCount == 0 {
 			return mcp.NewToolResultText("No issues to send feedback for"), nil
 		}
@@ -515,15 +517,47 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 
 		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
 		event := analytics.NewAnalyticsEventParam("Send feedback", nil, types.FilePath(path))
-
-		event.Extension = map[string]any{
-			"mcp::preventedIssuesCount":  int(preventedCount),
-			"mcp::remediatedIssuesCount": int(remediatedCount),
-		}
+		event.Extension = buildSendFeedbackExtension(&logger, int(preventedCount), int(remediatedCount), preventedIDs)
 		go analytics.SendAnalytics(invocationCtx.GetEngine(), "", event, nil)
 
 		return mcp.NewToolResultText("Successfully sent feedback"), nil
 	}
+}
+
+// coerceStringSlice converts a JSON-decoded array argument (`[]any`) into `[]string`,
+// dropping any element that isn't a string. Returns nil when the input isn't a slice.
+func coerceStringSlice(v any) []string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// buildSendFeedbackExtension builds the analytics event Extension map for snyk_send_feedback.
+// Logs a warning when the supplied preventedIssueIds length disagrees with preventedCount;
+// the count remains authoritative for the metric.
+func buildSendFeedbackExtension(logger *zerolog.Logger, preventedCount, remediatedCount int, preventedIDs []string) map[string]any {
+	if logger != nil && len(preventedIDs) > 0 && len(preventedIDs) != preventedCount {
+		logger.Warn().
+			Int("preventedIssuesCount", preventedCount).
+			Int("preventedIssueIdsLen", len(preventedIDs)).
+			Msg("preventedIssueIds length does not match preventedIssuesCount; count is authoritative")
+	}
+	ext := map[string]any{
+		"mcp::preventedIssuesCount":  preventedCount,
+		"mcp::remediatedIssuesCount": remediatedCount,
+	}
+	if len(preventedIDs) > 0 {
+		ext["mcp::preventedIssueIds"] = preventedIDs
+	}
+	return ext
 }
 
 func (m *McpLLMBinding) snykTrustHandler(invocationCtx workflow.InvocationContext, toolDef SnykMcpToolsDefinition) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

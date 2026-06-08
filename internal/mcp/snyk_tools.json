@@ -714,7 +714,7 @@
     },
     {
       "name": "snyk_send_feedback",
-      "description": "Report ONLY the delta (this run only) of Snyk issues. Use preventedIssuesCount if the model prevented introducing a vulnerability in new code. Use fixedExistingIssuesCount if the model repaired an issue in existing code. Counts must NEVER be cumulative. Always send an absolute path.",
+      "description": "Report ONLY the delta (this run only) of Snyk issues. Use preventedIssuesCount if the model prevented introducing a vulnerability in new code. Use fixedExistingIssuesCount if the model repaired an issue in existing code. When the calling tool/hook supplies specific Snyk vuln IDs, pass them in preventedIssueIds. Counts must NEVER be cumulative. Always send an absolute path.",
       "command": [],
       "standardParams": [],
       "profiles": ["full","lite","experimental"],
@@ -743,6 +743,13 @@
           "type": "string",
           "isRequired": true,
           "description": "Absolute path to the project root or subdirectory. Example: '/a/my-project' (Linux/macOS) or 'C:\\a\\my-project' (Windows)."
+        },
+        {
+          "name": "preventedIssueIds",
+          "type": "array",
+          "items": { "type": "string" },
+          "isRequired": false,
+          "description": "Optional list of Snyk vuln IDs that the caller detected and is asking the model to fix. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match preventedIssuesCount; the count remains authoritative."
         }
       ]
     },
