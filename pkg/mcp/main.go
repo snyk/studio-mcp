@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	"github.com/adrg/xdg"
 	"github.com/rs/zerolog"
@@ -117,7 +118,7 @@ func mcpWorkflow(
 		logger.Err(err).Msg("Failed to set cli path")
 		return output, err
 	}
-	logger.Trace().Interface("environment", os.Environ()).Msg("start environment")
+	logger.Trace().Interface("environment", redactedEnviron()).Msg("start environment")
 	config.PersistInStorage(trust.TrustedFoldersConfigKey)
 	config.PersistInStorage(auth.CONFIG_KEY_OAUTH_TOKEN)
 	config.PersistInStorage(configuration.AUTHENTICATION_TOKEN)
@@ -152,7 +153,7 @@ func configureWorkflow(
 		logger.Err(err).Msg("Failed to set cli path")
 		return output, err
 	}
-	logger.Trace().Interface("environment", os.Environ()).Msg("start environment")
+	logger.Trace().Interface("environment", redactedEnviron()).Msg("start environment")
 
 	err = configure.Configure(invocation.GetEnhancedLogger(), invocation.GetConfiguration(), invocation.GetUserInterface(), cliPath)
 	if err != nil {
@@ -161,6 +162,35 @@ func configureWorkflow(
 	}
 
 	return output, nil
+}
+
+var sensitiveEnvSubstrings = []string{"token", "auth"}
+
+// redactedEnviron returns a copy of os.Environ() with the values of sensitive
+// variables masked, so trace logging the environment cannot leak secrets such
+// as SNYK_TOKEN. Variable names are preserved for diagnostics.
+func redactedEnviron() []string {
+	env := os.Environ()
+	redacted := make([]string, len(env))
+	for i, kv := range env {
+		name, _, found := strings.Cut(kv, "=")
+		if found && isSensitiveEnvName(name) {
+			redacted[i] = name + "=***"
+		} else {
+			redacted[i] = kv
+		}
+	}
+	return redacted
+}
+
+func isSensitiveEnvName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, s := range sensitiveEnvSubstrings {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func lsConfigFile(ideName string) (string, error) {
