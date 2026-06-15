@@ -88,6 +88,7 @@
     </div>
   </div>
 </div>
+<script>var __TRUST_NONCE__ = "{{.Nonce}}";</script>
 <script>
   function sendAction(action) {
     var messageElem = document.getElementById('message');
@@ -100,6 +101,7 @@
 
     var xhr = new XMLHttpRequest();
     xhr.open('POST', action, true);
+    xhr.setRequestHeader('X-Trust-Nonce', __TRUST_NONCE__);
 
     xhr.onload = function() {
       headerElem.style.display = 'none';

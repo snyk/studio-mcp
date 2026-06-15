@@ -18,18 +18,19 @@ package trust
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	_ "embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html/template"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/pkg/browser"
@@ -65,8 +66,8 @@ func NewFolderTrust(logger *zerolog.Logger, config configuration.Configuration) 
 			if f == "" {
 				continue
 			}
-			// AddTrustedFolder checks if the folder is already trusted
 			folderTrust.AddTrustedFolder(f)
+			folderTrust.logger.Warn().Str("folder", f).Msg("Folder auto-trusted via TRUSTED_FOLDERS environment variable")
 		}
 	}
 
@@ -154,6 +155,14 @@ func (t *FolderTrust) addTrustedFolder(folder string) {
 	t.config.Set(TrustedFoldersConfigKey, trustedFolders)
 }
 
+func generateNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func (t *FolderTrust) HandleTrust(ctx context.Context, folderPath string, logger zerolog.Logger) (*mcp.CallToolResult, error) {
 	resultChan := make(chan *mcp.CallToolResult)
 	errorChan := make(chan error)
@@ -166,6 +175,17 @@ func (t *FolderTrust) HandleTrust(ctx context.Context, folderPath string, logger
 		return nil, fmt.Errorf("failed to parse HTML template from trust.SnykTrustPage: %w", err)
 	}
 
+	nonce, err := generateNonce()
+	if err != nil {
+		return nil, err
+	}
+
+	serverUrl, listener, err := networking.RandomLoopbackListener()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create listener: %w", err)
+	}
+	rawUrl := serverUrl.String()
+
 	mux := http.NewServeMux()
 	server := &http.Server{Handler: mux}
 	defer func() {
@@ -177,24 +197,7 @@ func (t *FolderTrust) HandleTrust(ctx context.Context, folderPath string, logger
 		}
 	}()
 
-	t.addHttpHandlers(logger, mux, folderPath, tmpl, resultChan, errorChan)
-
-	serverUrl, err := networking.LoopbackURL()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get default url: %w", err)
-	}
-
-	retries := 0
-	for networking.IsPortInUse(serverUrl) && retries < 10 {
-		time.Sleep(10 * time.Millisecond)
-		retries++
-	}
-	rawUrl := serverUrl.String()
-	listener, err := net.Listen("tcp", serverUrl.Host)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create listener: %w", err)
-	}
+	t.addHttpHandlers(logger, mux, folderPath, nonce, tmpl, resultChan, errorChan)
 
 	go func() {
 		logger.Info().Str("url", rawUrl).Msg("Starting trust confirmation server")
@@ -226,10 +229,33 @@ func (t *FolderTrust) HandleTrust(ctx context.Context, folderPath string, logger
 	}
 }
 
-func (t *FolderTrust) addHttpHandlers(logger zerolog.Logger, mux *http.ServeMux, folderPath string, tmpl *template.Template, resultChan chan *mcp.CallToolResult, errorChan chan error) {
+func (t *FolderTrust) addHttpHandlers(logger zerolog.Logger, mux *http.ServeMux, folderPath string, nonce string, tmpl *template.Template, resultChan chan *mcp.CallToolResult, errorChan chan error) {
+	validateRequest := func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return false
+		}
+		if !networking.IsValidLoopbackRequest(r) {
+			logger.Warn().Str("origin", r.Header.Get("Origin")).Msg("Rejected cross-origin request to trust server")
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return false
+		}
+		receivedNonce := r.Header.Get("X-Trust-Nonce")
+		if subtle.ConstantTimeCompare([]byte(receivedNonce), []byte(nonce)) != 1 {
+			logger.Warn().Msg("Rejected request with invalid or missing nonce")
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return false
+		}
+		return true
+	}
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		pageData := struct{ Path string }{Path: folderPath}
+		w.Header().Set("X-Frame-Options", "DENY")
+		pageData := struct {
+			Path  string
+			Nonce string
+		}{Path: folderPath, Nonce: nonce}
 		tmpErr := tmpl.Execute(w, pageData)
 		if tmpErr != nil {
 			http.Error(w, "Failed to render page", http.StatusInternalServerError)
@@ -239,8 +265,7 @@ func (t *FolderTrust) addHttpHandlers(logger zerolog.Logger, mux *http.ServeMux,
 	})
 
 	mux.HandleFunc("/trust", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if !validateRequest(w, r) {
 			return
 		}
 		logger.Info().Str("path", folderPath).Msg("User chose to trust folder")
@@ -250,8 +275,7 @@ func (t *FolderTrust) addHttpHandlers(logger zerolog.Logger, mux *http.ServeMux,
 	})
 
 	mux.HandleFunc("/cancel", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if !validateRequest(w, r) {
 			return
 		}
 		logger.Info().Str("path", folderPath).Msg("User chose not to trust folder")

@@ -1,12 +1,18 @@
 package trust
 
 import (
+	"bytes"
+	"html/template"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_folderContains(t *testing.T) {
@@ -244,4 +250,153 @@ func TestFolderTrust_AddTrustedFolder_Direct(t *testing.T) {
 			assert.ElementsMatch(t, tt.expectedFinalPaths, actualFinalPaths, "The final list of trusted paths did not match the expected list.")
 		})
 	}
+}
+
+func TestGenerateNonce(t *testing.T) {
+	nonce1, err := generateNonce()
+	require.NoError(t, err)
+	assert.Len(t, nonce1, 64)
+
+	nonce2, err := generateNonce()
+	require.NoError(t, err)
+	assert.NotEqual(t, nonce1, nonce2)
+}
+
+func newTestHandlers(t *testing.T, nonce string) (*http.ServeMux, chan *mcp.CallToolResult, chan error) {
+	t.Helper()
+	logger := zerolog.Nop()
+	config := configuration.NewWithOpts(configuration.WithAutomaticEnv())
+	ft := NewFolderTrust(&logger, config)
+	tmpl, err := template.New("trustPage").Parse(SnykTrustPage)
+	require.NoError(t, err)
+
+	resultChan := make(chan *mcp.CallToolResult, 1)
+	errorChan := make(chan error, 1)
+	mux := http.NewServeMux()
+	ft.addHttpHandlers(logger, mux, "/test/folder", nonce, tmpl, resultChan, errorChan)
+	return mux, resultChan, errorChan
+}
+
+func TestAddHttpHandlers_NonceValidation(t *testing.T) {
+	nonce := "abc123def456"
+
+	tests := []struct {
+		name           string
+		path           string
+		nonceHeader    string
+		expectedStatus int
+	}{
+		{
+			name:           "valid nonce on /trust",
+			path:           "/trust",
+			nonceHeader:    nonce,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "wrong nonce on /trust",
+			path:           "/trust",
+			nonceHeader:    "wrong-nonce",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "missing nonce on /trust",
+			path:           "/trust",
+			nonceHeader:    "",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "valid nonce on /cancel",
+			path:           "/cancel",
+			nonceHeader:    nonce,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "wrong nonce on /cancel",
+			path:           "/cancel",
+			nonceHeader:    "wrong-nonce",
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux, _, _ := newTestHandlers(t, nonce)
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			req.Host = "127.0.0.1"
+			if tt.nonceHeader != "" {
+				req.Header.Set("X-Trust-Nonce", tt.nonceHeader)
+			}
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+		})
+	}
+}
+
+func TestAddHttpHandlers_OriginValidation(t *testing.T) {
+	nonce := "test-nonce-value"
+
+	tests := []struct {
+		name           string
+		host           string
+		origin         string
+		expectedStatus int
+	}{
+		{
+			name:           "loopback origin allowed",
+			host:           "127.0.0.1",
+			origin:         "http://127.0.0.1:54321",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "no origin allowed",
+			host:           "127.0.0.1",
+			origin:         "",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "external origin rejected",
+			host:           "127.0.0.1",
+			origin:         "http://evil.com",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "external host rejected",
+			host:           "evil.com",
+			origin:         "",
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux, _, _ := newTestHandlers(t, nonce)
+
+			req := httptest.NewRequest(http.MethodPost, "/trust", nil)
+			req.Host = tt.host
+			req.Header.Set("X-Trust-Nonce", nonce)
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+		})
+	}
+}
+
+func TestNewFolderTrust_LogsEnvSeededFolders(t *testing.T) {
+	t.Setenv("TRUSTED_FOLDERS", "/foo;/bar")
+
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+	config := configuration.NewWithOpts(configuration.WithAutomaticEnv())
+
+	_ = NewFolderTrust(&logger, config)
+
+	output := buf.String()
+	assert.Contains(t, output, "/foo")
+	assert.Contains(t, output, "/bar")
+	assert.Contains(t, output, "auto-trusted")
 }
