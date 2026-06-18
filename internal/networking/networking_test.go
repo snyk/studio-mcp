@@ -19,6 +19,7 @@ package networking
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -88,5 +89,99 @@ func Test_determineFreePort(t *testing.T) {
 	port = DetermineFreePort()
 	if port > DefaultPort && port < DefaultPort+1000 {
 		t.Errorf("Expected to fail to find a free port. Port %d found instead ", port)
+	}
+}
+
+func Test_RandomLoopbackListener(t *testing.T) {
+	u, listener, err := RandomLoopbackListener()
+	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
+
+	assert.Equal(t, "http", u.Scheme)
+	assert.Contains(t, u.Host, DefaultHost)
+
+	addr := listener.Addr().(*net.TCPAddr)
+	assert.NotEqual(t, DefaultPort, addr.Port)
+
+	conn, dialErr := net.Dial("tcp", listener.Addr().String())
+	require.NoError(t, dialErr)
+	_ = conn.Close()
+}
+
+func Test_IsValidLoopbackRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     string
+		origin   string
+		expected bool
+	}{
+		{
+			name:     "valid localhost host, no origin",
+			host:     "localhost",
+			origin:   "",
+			expected: true,
+		},
+		{
+			name:     "valid localhost host and origin",
+			host:     "localhost",
+			origin:   "http://localhost:3000",
+			expected: true,
+		},
+		{
+			name:     "valid IPv4 loopback",
+			host:     "127.0.0.1",
+			origin:   "",
+			expected: true,
+		},
+		{
+			name:     "valid IPv6 loopback",
+			host:     "::1",
+			origin:   "",
+			expected: true,
+		},
+		{
+			name:     "external host rejected",
+			host:     "example.com",
+			origin:   "",
+			expected: false,
+		},
+		{
+			name:     "external origin rejected",
+			host:     "localhost",
+			origin:   "http://evil.com",
+			expected: false,
+		},
+		{
+			name:     "empty host and origin allowed",
+			host:     "",
+			origin:   "",
+			expected: true,
+		},
+		{
+			name:     "localhost host with port",
+			host:     "localhost:8080",
+			origin:   "",
+			expected: true,
+		},
+		{
+			name:     "127.0.0.1 origin with external host rejected",
+			host:     "evil.com",
+			origin:   "http://127.0.0.1:3000",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &http.Request{
+				Header: make(http.Header),
+				Host:   tt.host,
+			}
+			if tt.origin != "" {
+				r.Header.Set("Origin", tt.origin)
+			}
+			result := IsValidLoopbackRequest(r)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }

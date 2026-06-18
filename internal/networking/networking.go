@@ -19,6 +19,7 @@ package networking
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 )
 
@@ -52,6 +53,50 @@ func DetermineFreePort() int {
 		port++
 	}
 	return port
+}
+
+func RandomLoopbackListener() (*url.URL, net.Listener, error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort(DefaultHost, "0"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to listen on loopback: %w", err)
+	}
+	addr := listener.Addr().(*net.TCPAddr)
+	u, err := url.Parse(fmt.Sprintf("http://%s:%d", DefaultHost, addr.Port))
+	if err != nil {
+		_ = listener.Close()
+		return nil, nil, err
+	}
+	return u, listener, nil
+}
+
+var AllowedLoopbackHostnames = map[string]bool{
+	"localhost": true,
+	"127.0.0.1": true,
+	"::1":       true,
+	"":          true,
+}
+
+func IsValidLoopbackRequest(r *http.Request) bool {
+	originHeader := r.Header.Get("Origin")
+	isValidOrigin := originHeader == ""
+	hostHeader := r.Host
+	host, _, err := net.SplitHostPort(hostHeader)
+	if err != nil {
+		host = hostHeader
+	}
+	isValidHost := AllowedLoopbackHostnames[host]
+
+	if !isValidOrigin {
+		parsedOrigin, err := url.Parse(originHeader)
+		if err == nil {
+			requestHost := parsedOrigin.Hostname()
+			if _, allowed := AllowedLoopbackHostnames[requestHost]; allowed {
+				isValidOrigin = true
+			}
+		}
+	}
+
+	return isValidOrigin && isValidHost
 }
 
 func LoopbackURL() (*url.URL, error) {

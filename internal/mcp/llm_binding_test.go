@@ -259,7 +259,7 @@ func TestIsValidHttpRequest(t *testing.T) {
 				r.Header.Set("Origin", tt.origin)
 			}
 
-			result := isValidHttpRequest(r)
+			result := networking.IsValidLoopbackRequest(r)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
