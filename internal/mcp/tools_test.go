@@ -2247,7 +2247,8 @@ func startBreakabilityMockServer(t *testing.T, expectOrgID string, statusCode in
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Contains(t, r.URL.Path, "/hidden/orgs/"+expectOrgID+"/breakability")
-		require.Equal(t, "2024-10-15", r.URL.Query().Get("version"))
+		require.Equal(t, "2025-11-05", r.URL.Query().Get("version"))
+		require.Equal(t, "true", r.URL.Query().Get("allow_partial"))
 		require.Equal(t, "application/vnd.api+json", r.Header.Get("Content-Type"))
 
 		if capturedBody != nil {
@@ -2418,12 +2419,19 @@ func TestSnykBreakabilityHandler_SuccessfulResponse(t *testing.T) {
 			capturedBody := map[string]interface{}{}
 			respBody := map[string]interface{}{
 				"jsonapi": map[string]interface{}{"version": "1.0"},
-				"data": map[string]interface{}{
-					"id":   "33333333-3333-3333-3333-333333333333",
-					"type": "breakability",
-					"attributes": map[string]interface{}{
-						"risk_level": tc.riskLevel,
-						"summary":    tc.summary,
+				"data": []interface{}{
+					map[string]interface{}{
+						"id":   "33333333-3333-3333-3333-333333333333",
+						"type": "breakability",
+						"attributes": map[string]interface{}{
+							"package_upgrade": map[string]interface{}{
+								"name":          "express",
+								"from_version":  "4.18.0",
+								"to_version":    "5.0.0",
+							},
+							"risk_level": tc.riskLevel,
+							"summary":    tc.summary,
+						},
 					},
 				},
 			}
@@ -2476,13 +2484,14 @@ func TestSnykBreakabilityHandler_GracefulFailure(t *testing.T) {
 		"package_version_to":   "4.17.21",
 	}
 
-	t.Run("API returns 200 but data is missing", func(t *testing.T) {
+	t.Run("API returns 200 but data is empty", func(t *testing.T) {
 		fixture := setupTestFixture(t)
 		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
 		require.NotNil(t, toolDef)
 
 		respBody := map[string]interface{}{
 			"jsonapi": map[string]interface{}{"version": "1.0"},
+			"data":    []interface{}{},
 		}
 		apiURL := startBreakabilityMockServer(t, orgID, http.StatusOK, respBody, nil)
 		configureBreakabilityFixture(t, fixture, apiURL, orgID)
@@ -2508,6 +2517,43 @@ func TestSnykBreakabilityHandler_GracefulFailure(t *testing.T) {
 			"errors": []interface{}{map[string]interface{}{"status": "500", "detail": "boom"}},
 		}
 		apiURL := startBreakabilityMockServer(t, orgID, http.StatusInternalServerError, respBody, nil)
+		configureBreakabilityFixture(t, fixture, apiURL, orgID)
+
+		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)
+
+		result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		require.Equal(t, breakabilityErrMsg, text.Text)
+	})
+
+	t.Run("API returns 200 but package_upgrade does not match request", func(t *testing.T) {
+		fixture := setupTestFixture(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.Breakability)
+		require.NotNil(t, toolDef)
+
+		respBody := map[string]interface{}{
+			"jsonapi": map[string]interface{}{"version": "1.0"},
+			"data": []interface{}{
+				map[string]interface{}{
+					"id":   "33333333-3333-3333-3333-333333333333",
+					"type": "breakability",
+					"attributes": map[string]interface{}{
+						"package_upgrade": map[string]interface{}{
+							"name":         "other-package",
+							"from_version": "1.0.0",
+							"to_version":   "2.0.0",
+						},
+						"risk_level": "low",
+						"summary":    "unrelated",
+					},
+				},
+			},
+		}
+		apiURL := startBreakabilityMockServer(t, orgID, http.StatusOK, respBody, nil)
 		configureBreakabilityFixture(t, fixture, apiURL, orgID)
 
 		handler := fixture.binding.snykBreakabilityHandler(fixture.invocationContext, *toolDef)

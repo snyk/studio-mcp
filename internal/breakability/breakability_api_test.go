@@ -11,12 +11,13 @@
 package breakability
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2024-10-15"
+	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2025-11-05"
 )
 
 func TestBuildBreakabilityResponse(t *testing.T) {
@@ -90,6 +91,56 @@ func TestBuildBreakabilityResponse(t *testing.T) {
 			assert.Empty(t, result.PublicId, "PublicId should not be populated by BuildBreakabilityResponse")
 		})
 	}
+}
+
+func TestSelectAssessment(t *testing.T) {
+	upgrade := PackageUpgrade{Name: "lodash", FromVersion: "4.17.10", ToVersion: "4.17.21"}
+
+	parseBody := func(jsonBody string) *breakabilityapi.BreakabilityAssessmentsResponseBody {
+		var body breakabilityapi.BreakabilityAssessmentsResponseBody
+		require.NoError(t, json.Unmarshal([]byte(jsonBody), &body))
+		return &body
+	}
+
+	t.Run("nil body returns nil", func(t *testing.T) {
+		assert.Nil(t, SelectAssessment(nil, upgrade))
+	})
+
+	t.Run("empty data returns nil", func(t *testing.T) {
+		assert.Nil(t, SelectAssessment(parseBody(`{"data":[]}`), upgrade))
+	})
+
+	t.Run("matching upgrade is returned", func(t *testing.T) {
+		body := parseBody(`{
+			"data":[{
+				"id":"33333333-3333-3333-3333-333333333333",
+				"type":"breakability",
+				"attributes":{
+					"package_upgrade":{"name":"lodash","from_version":"4.17.10","to_version":"4.17.21"},
+					"risk_level":"low",
+					"summary":"Patch only"
+				}
+			}]
+		}`)
+		result := SelectAssessment(body, upgrade)
+		require.NotNil(t, result)
+		assert.Equal(t, "Patch only", result.Summary)
+	})
+
+	t.Run("non-matching upgrade returns nil", func(t *testing.T) {
+		body := parseBody(`{
+			"data":[{
+				"id":"33333333-3333-3333-3333-333333333333",
+				"type":"breakability",
+				"attributes":{
+					"package_upgrade":{"name":"express","from_version":"4.0.0","to_version":"5.0.0"},
+					"risk_level":"high",
+					"summary":"Breaking"
+				}
+			}]
+		}`)
+		assert.Nil(t, SelectAssessment(body, upgrade))
+	})
 }
 
 func TestToAPIUpgrades(t *testing.T) {

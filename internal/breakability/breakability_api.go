@@ -1,7 +1,7 @@
 package breakability
 
 import (
-	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2024-10-15"
+	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2025-11-05"
 )
 
 const (
@@ -38,6 +38,20 @@ func BuildBreakabilityResponse(attrs *breakabilityapi.BreakabilityResponseAttrib
 	}
 
 	return response
+}
+
+func SelectAssessment(body *breakabilityapi.BreakabilityAssessmentsResponseBody, upgrade PackageUpgrade) *breakabilityapi.BreakabilityResponseAttributes {
+	if body == nil || body.Data == nil {
+		return nil
+	}
+	for _, item := range *body.Data {
+		pu := item.Attributes.PackageUpgrade
+		if pu.Name == upgrade.Name && pu.FromVersion == upgrade.FromVersion && pu.ToVersion == upgrade.ToVersion {
+			attrs := item.Attributes
+			return &attrs
+		}
+	}
+	return nil
 }
 
 func ToAPIUpgrades(upgrades []PackageUpgrade) []breakabilityapi.Upgrade {

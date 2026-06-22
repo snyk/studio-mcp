@@ -7,7 +7,7 @@ generated client code can be regenerated with `go generate`.
 | Script                          | Service             | Upstream repo                  | Vendored to                                          |
 |---------------------------------|---------------------|--------------------------------|------------------------------------------------------|
 | `pull-down-package-api.sh`      | Package API         | `snyk/package-api-service`     | `internal/apiclients/package/2024-10-15/spec.yaml`   |
-| `pull-down-breakability-api.sh` | Breakability API    | `snyk/breakability-service`    | `internal/apiclients/breakability/2024-10-15/spec.yaml` |
+| `pull-down-breakability-api.sh` | Breakability API    | `snyk/breakability-service`    | `internal/apiclients/breakability/2025-11-05/spec.yaml` |
 
 ## Prerequisites
 
@@ -49,7 +49,7 @@ After the spec has been refreshed, regenerate the typed client:
 go generate ./internal/apiclients/package/2024-10-15/...
 
 # Breakability API
-go generate ./internal/apiclients/breakability/2024-10-15/...
+go generate ./internal/apiclients/breakability/2025-11-05/...
 ```
 
 This invokes `oapi-codegen` per the `//go:generate` directive in each

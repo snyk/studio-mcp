@@ -182,9 +182,38 @@ components:
       description: Resolved API version
       pattern: ^((([0-9]{4})-([0-1][0-9]))-((3[01])|(0[1-9])|([12][0-9]))(~(wip|work-in-progress|experimental|beta))?)$
       type: string
+    BreakabilityAssessmentsResponseBody:
+      additionalProperties: false
+      properties:
+        data:
+          description: Breakability assessment resources.
+          items:
+            additionalProperties: false
+            properties:
+              attributes:
+                $ref: '#/components/schemas/BreakabilityResponseAttributes'
+              id:
+                example: d5b640e5-d88c-4c17-9bf0-93597b7a1ce2
+                format: uuid
+                type: string
+              type:
+                $ref: '#/components/schemas/Types'
+            required:
+            - id
+            - type
+            - attributes
+            type: object
+          type: array
+        jsonapi:
+          $ref: '#/components/schemas/JsonApi'
+        links:
+          $ref: '#/components/schemas/PaginatedLinks'
+      type: object
     BreakabilityResponseAttributes:
       additionalProperties: false
       properties:
+        package_upgrade:
+          $ref: '#/components/schemas/Upgrade'
         public_id:
           description: The stable identifier of the persisted assessment. Only present
             when the assessment was successfully stored in the db. Absent if the db
@@ -194,7 +223,7 @@ components:
           type: string
         risk_level:
           description: The estimated breakability risk level of the analyzed package
-            upgrades.
+            upgrade.
           enum:
           - low
           - medium
@@ -205,6 +234,7 @@ components:
             the estimated risk_level and possible mitigations.
           type: string
       required:
+      - package_upgrade
       - risk_level
       - summary
       type: object
@@ -461,8 +491,8 @@ paths:
       - OpenAPI
   /orgs/{org_id}/breakability:
     post:
-      description: Generate a breakability assessment for one or more package upgrades
-      operationId: createBreakabilityAnalysis
+      description: Generate a breakability assessment for each given package upgrade
+      operationId: createBreakabilityAssessments
       parameters:
       - description: The public ID of the organization
         in: path
@@ -472,6 +502,14 @@ paths:
           format: uuid
           type: string
       - $ref: '#/components/parameters/Version'
+      - description: When true, continue breakability analysis if one or more package
+          upgrade assessments fail. When false or omitted, stop on the first failure
+          (default).
+        in: query
+        name: allow_partial
+        schema:
+          default: false
+          type: boolean
       requestBody:
         content:
           application/vnd.api+json:
@@ -487,7 +525,7 @@ paths:
                         package_upgrades:
                           items:
                             $ref: '#/components/schemas/Upgrade'
-                          maxItems: 100
+                          maxItems: 50
                           minItems: 1
                           type: array
                       required:
@@ -510,31 +548,13 @@ paths:
           content:
             application/vnd.api+json:
               schema:
-                additionalProperties: false
-                properties:
-                  data:
-                    additionalProperties: false
-                    description: breakability assessment
-                    properties:
-                      attributes:
-                        $ref: '#/components/schemas/BreakabilityResponseAttributes'
-                      id:
-                        example: d5b640e5-d88c-4c17-9bf0-93597b7a1ce2
-                        format: uuid
-                        type: string
-                      type:
-                        $ref: '#/components/schemas/Types'
-                    required:
-                    - id
-                    - type
-                    - attributes
-                    type: object
-                  jsonapi:
-                    $ref: '#/components/schemas/JsonApi'
-                  links:
-                    $ref: '#/components/schemas/PaginatedLinks'
-                type: object
-          description: Returns a Breakability assessment
+                $ref: '#/components/schemas/BreakabilityAssessmentsResponseBody'
+          description: Returns breakability assessments in data. When allow_partial
+            is false or omitted, all requested assessments succeed and data contains
+            one item per requested package upgrade in request order. When allow_partial=true,
+            data contains only successfully created assessments (which may be fewer
+            than requested); compare data length to the number of requested package_upgrades
+            to detect partial success.
           headers:
             deprecation:
               $ref: '#/components/headers/DeprecationHeader'
@@ -578,11 +598,13 @@ paths:
       x-snyk-api-lifecycle: released
       x-snyk-api-owners:
       - '@snyk/open-source_fix-analysis'
+      - '@snyk/open-source_open-source-leadership'
       x-snyk-api-releases:
       - 2024-10-15~beta
+      - 2025-11-05~beta
       x-snyk-api-resource: breakability
       x-snyk-api-stability: beta
-      x-snyk-api-version: 2024-10-15~beta
+      x-snyk-api-version: 2025-11-05~beta
       x-stability-level: beta
 servers:
 - description: breakability-service
@@ -594,4 +616,4 @@ x-cerberus:
   authentication:
     strategies:
     - InternalJWT: {}
-x-snyk-api-version: "2024-10-15"
+x-snyk-api-version: "2025-11-05"
