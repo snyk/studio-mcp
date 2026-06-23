@@ -3,7 +3,7 @@
 API_SPEC_PATH=../breakability-service
 API_SPEC_BRANCH=${API_SPEC_BRANCH:-main}
 GENERATE_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-VERSION="2024-10-15"
+VERSION="2025-11-05"
 echo --------------------------------------------------------
 echo Updating API Spec for Breakability API
 echo

@@ -41,7 +41,7 @@ import (
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
 	"github.com/snyk/go-application-framework/pkg/workflow"
 	"github.com/snyk/studio-mcp/internal/analytics"
-	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2024-10-15"
+	breakabilityapi "github.com/snyk/studio-mcp/internal/apiclients/breakability/2025-11-05"
 	packageapi "github.com/snyk/studio-mcp/internal/apiclients/package/2024-10-15"
 	"github.com/snyk/studio-mcp/internal/authentication"
 	"github.com/snyk/studio-mcp/internal/breakability"
@@ -764,7 +764,7 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 
 		logger.Debug().Str("package", packageName).Str("from", packageFrom).Str("to", packageTo).Msg("Fetching breakability info")
 
-		const breakabilityApiVersion = "2024-10-15"
+		const breakabilityApiVersion = "2025-11-05"
 
 		upgrades := []breakability.PackageUpgrade{
 			{
@@ -774,12 +774,12 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 			},
 		}
 
-		reqBody := breakabilityapi.CreateBreakabilityAnalysisApplicationVndAPIPlusJSONRequestBody{
+		reqBody := breakabilityapi.CreateBreakabilityAssessmentsApplicationVndAPIPlusJSONRequestBody{
 			Data: struct {
 				Attributes struct {
 					PackageUpgrades []breakabilityapi.Upgrade `json:"package_upgrades"`
 				} `json:"attributes"`
-				Type breakabilityapi.CreateBreakabilityAnalysisApplicationVndAPIPlusJSONBodyDataType `json:"type"`
+				Type breakabilityapi.CreateBreakabilityAssessmentsApplicationVndAPIPlusJSONBodyDataType `json:"type"`
 			}{
 				Type: breakabilityapi.Breakability,
 				Attributes: struct {
@@ -792,21 +792,30 @@ func (m *McpLLMBinding) snykBreakabilityHandler(invocationCtx workflow.Invocatio
 
 		// We want the call to fail gracefully. Since the API isn't stable enough to handle load yet.
 		const breakabilityErrMsg = "no additional breakability context available"
-		resp, err := apiClient.CreateBreakabilityAnalysisWithApplicationVndAPIPlusJSONBodyWithResponse(
+		allowPartial := true
+		resp, err := apiClient.CreateBreakabilityAssessmentsWithApplicationVndAPIPlusJSONBodyWithResponse(
 			ctx,
 			orgId,
-			&breakabilityapi.CreateBreakabilityAnalysisParams{Version: breakabilityApiVersion},
+			&breakabilityapi.CreateBreakabilityAssessmentsParams{
+				Version:      breakabilityApiVersion,
+				AllowPartial: &allowPartial,
+			},
 			reqBody,
 		)
 		if err != nil {
 			logger.Error().Err(err).Msg("Failed to fetch breakability assessment")
 			return mcp.NewToolResultText(breakabilityErrMsg), nil
 		}
-		if resp.ApplicationvndApiJSON200 == nil || resp.ApplicationvndApiJSON200.Data == nil {
+		if resp.ApplicationvndApiJSON200 == nil {
 			return mcp.NewToolResultText(breakabilityErrMsg), nil
 		}
 
-		var response = breakability.BuildBreakabilityResponse(&resp.ApplicationvndApiJSON200.Data.Attributes)
+		attrs := breakability.SelectAssessment(resp.ApplicationvndApiJSON200, upgrades[0])
+		if attrs == nil {
+			return mcp.NewToolResultText(breakabilityErrMsg), nil
+		}
+
+		var response = breakability.BuildBreakabilityResponse(attrs)
 
 		jsonBytes, err := json.Marshal(response)
 		if err != nil {
