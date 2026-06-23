@@ -1,6 +1,6 @@
 module github.com/snyk/studio-mcp
 
-go 1.25.7
+go 1.25.11
 
 tool (
 	github.com/golang/mock/mockgen
@@ -9,7 +9,7 @@ tool (
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/go-git/go-git/v5 v5.14.0
+	github.com/go-git/go-git/v5 v5.19.1
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.31.0
@@ -22,7 +22,7 @@ require (
 	github.com/snyk/go-application-framework v0.0.0-20260202103514-24f6db41a35d
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
+	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f
 	golang.org/x/oauth2 v0.33.0
 )
 
@@ -40,18 +40,18 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
-	github.com/cloudflare/circl v1.6.0 // indirect
-	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dprotaso/go-yit v0.0.0-20240618133044-5a0af90af097 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/getkin/kin-openapi v0.133.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.6.2 // indirect
+	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.1 // indirect
 	github.com/go-openapi/swag v0.23.1 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
@@ -64,6 +64,7 @@ require (
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
@@ -78,7 +79,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
-	github.com/pjbgf/sha1cd v0.3.2 // indirect
+	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/puzpuzpuz/xsync v1.5.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -104,7 +105,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
