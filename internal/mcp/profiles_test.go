@@ -178,10 +178,10 @@ func TestIsToolInProfile(t *testing.T) {
 		{"snyk_sbom_scan", false, true, true},
 		{"snyk_aibom", false, true, true},
 		{"snyk_package_health_check", false, true, true},
+		{"snyk_breakability_check", false, true, true},
 
 		// Tools in experimental only
 		{"snyk_secret_scan", false, false, true},
-		{"snyk_breakability_check", false, false, true},
 	}
 
 	// Load actual tools from JSON

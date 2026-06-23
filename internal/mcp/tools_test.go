@@ -2093,10 +2093,10 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_sbom_scan",
 				"snyk_aibom",
 				"snyk_package_health_check",
+				"snyk_breakability_check",
 			},
 			unexpectedTools: []string{
 				"snyk_secret_scan",
-				"snyk_breakability_check",
 			},
 		},
 		{
@@ -2203,7 +2203,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom", "snyk_package_health_check":
+			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom", "snyk_package_health_check", "snyk_breakability_check":
 				// These should be in full but not lite
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
@@ -2212,7 +2212,7 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_secret_scan", "snyk_breakability_check":
+			case "snyk_secret_scan":
 				// These should be experimental only
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
@@ -2514,7 +2514,7 @@ func TestSnykBreakabilityHandler_GracefulFailure(t *testing.T) {
 
 		respBody := map[string]interface{}{
 			"jsonapi": map[string]interface{}{"version": "1.0"},
-			"errors": []interface{}{map[string]interface{}{"status": "500", "detail": "boom"}},
+			"errors":  []interface{}{map[string]interface{}{"status": "500", "detail": "boom"}},
 		}
 		apiURL := startBreakabilityMockServer(t, orgID, http.StatusInternalServerError, respBody, nil)
 		configureBreakabilityFixture(t, fixture, apiURL, orgID)
