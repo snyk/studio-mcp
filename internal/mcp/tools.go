@@ -62,25 +62,27 @@ const (
 // ToolName defines all custom tool names.
 // Values must match the "name" field in snyk_tools.json.
 var ToolName = struct {
-	ScaTest       string
-	CodeTest      string
-	Version       string
-	Auth          string
-	Logout        string
-	Trust         string
-	SendFeedback  string
-	PackageHealth string
-	Breakability  string
+	ScaTest        string
+	CodeTest       string
+	Version        string
+	Auth           string
+	Logout         string
+	Trust          string
+	SendFeedback   string
+	PackageHealth  string
+	Breakability   string
+	ListPrFindings string
 }{
-	ScaTest:       "snyk_sca_scan",
-	CodeTest:      "snyk_code_scan",
-	Version:       "snyk_version",
-	Auth:          "snyk_auth",
-	Logout:        "snyk_logout",
-	Trust:         "snyk_trust",
-	SendFeedback:  "snyk_send_feedback",
-	PackageHealth: "snyk_package_health_check",
-	Breakability:  "snyk_breakability_check",
+	ScaTest:        "snyk_sca_scan",
+	CodeTest:       "snyk_code_scan",
+	Version:        "snyk_version",
+	Auth:           "snyk_auth",
+	Logout:         "snyk_logout",
+	Trust:          "snyk_trust",
+	SendFeedback:   "snyk_send_feedback",
+	PackageHealth:  "snyk_package_health_check",
+	Breakability:   "snyk_breakability_check",
+	ListPrFindings: "snyk_list_pr_findings",
 }
 
 type SnykMcpToolAnnotations struct {
@@ -181,6 +183,8 @@ func (m *McpLLMBinding) addSnykTools(invocationCtx workflow.InvocationContext, p
 			m.mcpServer.AddTool(tool, m.snykPackageInfoHandler(invocationCtx, toolDef))
 		case ToolName.Breakability:
 			m.mcpServer.AddTool(tool, m.snykBreakabilityHandler(invocationCtx, toolDef))
+		case ToolName.ListPrFindings:
+			m.mcpServer.AddTool(tool, m.snykListPrFindingsHandler(invocationCtx, toolDef))
 		default:
 			m.mcpServer.AddTool(tool, m.defaultHandler(invocationCtx, toolDef))
 		}

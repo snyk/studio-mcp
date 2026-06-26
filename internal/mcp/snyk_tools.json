@@ -820,6 +820,40 @@
           "description": "The specific version of the package to look up. This is the version after the upgrade."
         }
       ]
+    },
+    {
+      "name": "snyk_list_pr_findings",
+      "description": "Lists open security findings (issues) for the authenticated organization from Snyk's platform, optionally scoped to a single project. Returns each finding's id, title, severity, type, and status. This is the set of findings a pull request check would surface for a project.\nWhen to use: when an agent needs to read existing Snyk findings for a project/PR to summarize, prioritize, or decide on remediation, rather than running a new local scan.",
+      "command": [],
+      "standardParams": [],
+      "profiles": ["full","experimental"],
+      "ignoreTrust": true,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "idempotentHint": true
+      },
+      "params": [
+        {
+          "name": "project_id",
+          "type": "string",
+          "isRequired": false,
+          "description": "Optional Snyk project ID (UUID) to scope findings to a single project. If omitted, findings across the whole organization are returned."
+        },
+        {
+          "name": "severity",
+          "type": "string",
+          "isRequired": false,
+          "description": "Optional minimum-noise severity filter. Must be one of: low, medium, high, critical. When set, only findings at that effective severity level are returned."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "isRequired": false,
+          "description": "Optional maximum number of findings to return (default 50, max 100)."
+        }
+      ]
     }
   ]
 }

@@ -179,6 +179,7 @@ func TestIsToolInProfile(t *testing.T) {
 		{"snyk_aibom", false, true, true},
 		{"snyk_package_health_check", false, true, true},
 		{"snyk_breakability_check", false, true, true},
+		{"snyk_list_pr_findings", false, true, true},
 
 		// Tools in experimental only
 		{"snyk_secret_scan", false, false, true},
