@@ -29,6 +29,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -123,6 +124,59 @@ func setupTestFixture(t *testing.T) *testFixture {
 
 func (f *testFixture) mockCliOutput(output string) {
 	createMockSnykCli(f.t, f.snykCliPath, output)
+}
+
+// analyticsCapture records the raw payload bytes handed to the mock engine's
+// InvokeWithInputAndConfig by each background analytics.SendAnalytics call, and
+// lets tests block until a known number of dispatches have completed before
+// asserting on them.
+type analyticsCapture struct {
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	payloads [][]byte
+}
+
+func (c *analyticsCapture) add(n int) {
+	c.wg.Add(n)
+}
+
+func (c *analyticsCapture) wait() {
+	c.wg.Wait()
+}
+
+func (c *analyticsCapture) all() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]byte{}, c.payloads...)
+}
+
+// allowAnalyticsDispatch wires the fixture's mock engine so that
+// snykSendFeedback's `go analytics.SendAnalytics(...)` background call can run
+// to completion (GetLogger/GetRuntimeInfo/InvokeWithInputAndConfig are
+// otherwise unmocked and would fail the test) and captures the payload each
+// dispatch sends. Callers must call capture.add(n) before triggering n
+// dispatches, then capture.wait() before inspecting capture.all().
+func (f *testFixture) allowAnalyticsDispatch() *analyticsCapture {
+	f.t.Helper()
+	capture := &analyticsCapture{}
+
+	nopLogger := zerolog.Nop()
+	f.mockEngine.EXPECT().GetLogger().Return(&nopLogger).AnyTimes()
+	f.mockEngine.EXPECT().GetRuntimeInfo().Return(runtimeinfo.New(runtimeinfo.WithName("test"), runtimeinfo.WithVersion("1.0.0"))).AnyTimes()
+	f.mockEngine.EXPECT().InvokeWithInputAndConfig(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ workflow.Identifier, input []workflow.Data, _ configuration.Configuration) ([]workflow.Data, error) {
+			defer capture.wg.Done()
+			if len(input) > 0 {
+				if b, ok := input[0].GetPayload().([]byte); ok {
+					capture.mu.Lock()
+					capture.payloads = append(capture.payloads, b)
+					capture.mu.Unlock()
+				}
+			}
+			return nil, nil
+		}).AnyTimes()
+
+	return capture
 }
 
 func getToolWithName(t *testing.T, tools *SnykMcpTools, toolName string) *SnykMcpToolsDefinition {
@@ -1797,6 +1851,42 @@ func TestSnykSendFeedbackHandler_Validation(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 	})
+}
+
+// TestSnykSendFeedbackHandler_CorrelationID covers the "Two feedback calls in
+// the same session share a correlation ID" spec scenario end-to-end through
+// the actual snykSendFeedback handler, not just the analytics helpers it
+// calls into.
+func TestSnykSendFeedbackHandler_CorrelationID(t *testing.T) {
+	fixture := setupTestFixture(t)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+	require.NotNil(t, toolDef)
+
+	fixture.binding.mintCorrelationID()
+	correlationID := fixture.binding.correlationID
+	require.NotEmpty(t, correlationID)
+
+	capture := fixture.allowAnalyticsDispatch()
+	handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+	capture.add(2)
+	for i := 0; i < 2; i++ {
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(1),
+			"fixedExistingIssuesCount": float64(0),
+			"path":                     "/tmp",
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	}
+	capture.wait()
+
+	payloads := capture.all()
+	require.Len(t, payloads, 2)
+	expectedURN := "urn:snyk:interaction:" + correlationID
+	require.Contains(t, string(payloads[0]), expectedURN)
+	require.Contains(t, string(payloads[1]), expectedURN)
 }
 
 func TestCoerceStringSlice(t *testing.T) {

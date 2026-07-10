@@ -62,6 +62,13 @@ type McpLLMBinding struct {
 	started         bool
 	cliPath         string
 	openBrowserFunc types.OpenBrowserFunc
+
+	// correlationID is a session-scoped identifier minted once per process in
+	// Start() and stamped on every snyk_send_feedback analytics event, so
+	// events from the same MCP session can be correlated (design.md D1). It is
+	// set once, before the server starts accepting tool calls, and is
+	// thereafter only read, so it needs no dedicated lock.
+	correlationID string
 }
 
 func NewMcpLLMBinding(opts ...Option) *McpLLMBinding {
@@ -78,8 +85,21 @@ func NewMcpLLMBinding(opts ...Option) *McpLLMBinding {
 	return mcpServerImpl
 }
 
+// mintCorrelationID mints the session-scoped correlation ID once per process
+// (design.md D1), if it hasn't been minted already. Every shipped MCP config
+// launches studio-mcp as a fresh process per IDE connection, so minting once
+// here - before any tool call can occur - is sufficient to correlate every
+// snyk_send_feedback event emitted during this session's lifetime.
+func (m *McpLLMBinding) mintCorrelationID() {
+	if m.correlationID == "" {
+		m.correlationID = uuid.New().String()
+	}
+}
+
 // Start starts the MCP server. It blocks until the server is stopped via Shutdown.
 func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) error {
+	m.mintCorrelationID()
+
 	runTimeInfo := invocationContext.GetRuntimeInfo()
 	version := ""
 	if runTimeInfo != nil {
