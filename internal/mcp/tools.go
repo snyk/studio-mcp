@@ -319,7 +319,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 			}
 		}
 
-		// Success path: upsert the scan-result cache (design.md D2) before enhancing
+		// Success path: upsert the scan-result cache before enhancing
 		// output, since enhancement re-shapes `output` into the LLM-facing format.
 		if success && (toolDef.Name == ToolName.CodeTest || toolDef.Name == ToolName.ScaTest) {
 			m.updateScanCache(&logger, toolDef, output, workingDir, includeIgnores)
@@ -526,7 +526,7 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 
 		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
 
-		// Verification never blocks or delays the call (design.md D4): it only
+		// Verification never blocks or delays the call: it only
 		// annotates the emitted event with a best-effort check of the claimed
 		// IDs against the scan-result cache.
 		combinedIDs := make([]string, 0, len(preventedIDs)+len(fixedIDs))
@@ -536,11 +536,19 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 
 		event := analytics.NewAnalyticsEventParam("Send feedback", nil, types.FilePath(path), m.correlationID)
 		event.Extension = buildSendFeedbackExtension(&logger, sendFeedbackParams{
-			preventedCount:  int(preventedCount),
-			remediatedCount: int(remediatedCount),
-			preventedIDs:    preventedIDs,
-			fixedIDs:        fixedIDs,
-			verification:    verification,
+			preventedCount:            int(preventedCount),
+			remediatedCount:           int(remediatedCount),
+			preventedIDs:              preventedIDs,
+			fixedIDs:                  fixedIDs,
+			fixedIssuesBySeverity:     coerceBreakdown(args["fixedIssuesBySeverity"], severityBreakdownKeys),
+			preventedIssuesBySeverity: coerceBreakdown(args["preventedIssuesBySeverity"], severityBreakdownKeys),
+			fixedIssuesByScanType:     coerceBreakdown(args["fixedIssuesByScanType"], scanTypeBreakdownKeys),
+			outcome:                   coerceOptionalString(args["outcome"]),
+			breakabilityRisk:          coerceOptionalString(args["breakabilityRisk"]),
+			breakabilityRiskSource:    coerceOptionalString(args["breakabilityRiskSource"]),
+			strategy:                  coerceOptionalString(args["strategy"]),
+			testsPassed:               coerceOptionalBoolPtr(args["testsPassed"]),
+			verification:              verification,
 		})
 		go analytics.SendAnalytics(invocationCtx.GetEngine(), "", event, nil)
 
@@ -564,19 +572,77 @@ func coerceStringSlice(v any) []string {
 	return out
 }
 
+var (
+	severityBreakdownKeys = []string{"critical", "high", "medium", "low"}
+	scanTypeBreakdownKeys = []string{"sast", "sca"}
+)
+
+// coerceBreakdown converts a JSON-decoded object argument (`map[string]any`) into
+// a `map[string]int`, keeping only the supplied keys and only values that decode
+// as numbers. Returns nil when the input isn't an object or no recognized key is
+// present, so callers can omit the extension key entirely rather than sending an
+// empty map.
+func coerceBreakdown(v any, keys []string) map[string]int {
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]int)
+	for _, key := range keys {
+		val, exists := raw[key]
+		if !exists {
+			continue
+		}
+		if f, ok := val.(float64); ok {
+			out[key] = int(f)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// coerceOptionalString returns v as a string, or "" when v isn't a string
+// (including when it's absent/nil).
+func coerceOptionalString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// coerceOptionalBoolPtr returns a pointer to v's bool value, or nil when v
+// isn't a bool (including when it's absent/nil), so callers can distinguish
+// "not provided" from "explicitly false".
+func coerceOptionalBoolPtr(v any) *bool {
+	b, ok := v.(bool)
+	if !ok {
+		return nil
+	}
+	return &b
+}
+
 // sendFeedbackParams holds every optional/required argument parsed from a
 // snyk_send_feedback call, used to build the analytics event Extension map.
 type sendFeedbackParams struct {
-	preventedCount  int
-	remediatedCount int
-	preventedIDs    []string
-	fixedIDs        []string
-	verification    verificationState
+	preventedCount            int
+	remediatedCount           int
+	preventedIDs              []string
+	fixedIDs                  []string
+	fixedIssuesBySeverity     map[string]int
+	preventedIssuesBySeverity map[string]int
+	fixedIssuesByScanType     map[string]int
+	outcome                   string
+	breakabilityRisk          string
+	breakabilityRiskSource    string
+	strategy                  string
+	testsPassed               *bool
+	verification              verificationState
 }
 
 // buildSendFeedbackExtension builds the analytics event Extension map for snyk_send_feedback.
 // Logs a warning when the supplied preventedIssueIds/fixedIssueIds length disagrees with its
-// corresponding count; the count remains authoritative for the metric.
+// corresponding count; the count remains authoritative for the metric. All richness fields are
+// optional and are only added to the extension map when present.
 func buildSendFeedbackExtension(logger *zerolog.Logger, p sendFeedbackParams) map[string]any {
 	if logger != nil && len(p.preventedIDs) > 0 && len(p.preventedIDs) != p.preventedCount {
 		logger.Warn().
@@ -600,6 +666,30 @@ func buildSendFeedbackExtension(logger *zerolog.Logger, p sendFeedbackParams) ma
 	}
 	if len(p.fixedIDs) > 0 {
 		ext["mcp::fixedIssueIds"] = p.fixedIDs
+	}
+	if len(p.fixedIssuesBySeverity) > 0 {
+		ext["mcp::fixedIssuesBySeverity"] = p.fixedIssuesBySeverity
+	}
+	if len(p.preventedIssuesBySeverity) > 0 {
+		ext["mcp::preventedIssuesBySeverity"] = p.preventedIssuesBySeverity
+	}
+	if len(p.fixedIssuesByScanType) > 0 {
+		ext["mcp::fixedIssuesByScanType"] = p.fixedIssuesByScanType
+	}
+	if p.outcome != "" {
+		ext["mcp::outcome"] = p.outcome
+	}
+	if p.breakabilityRisk != "" {
+		ext["mcp::breakabilityRisk"] = p.breakabilityRisk
+	}
+	if p.breakabilityRiskSource != "" {
+		ext["mcp::breakabilityRiskSource"] = p.breakabilityRiskSource
+	}
+	if p.strategy != "" {
+		ext["mcp::strategy"] = p.strategy
+	}
+	if p.testsPassed != nil {
+		ext["mcp::testsPassed"] = *p.testsPassed
 	}
 	if p.verification != "" {
 		ext["mcp::verification"] = string(p.verification)

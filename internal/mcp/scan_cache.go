@@ -31,7 +31,7 @@ import (
 // maxScanCacheEntries caps the scan-result cache at the 500 most-recently-updated
 // files. When a new distinct file path would exceed the cap, the
 // least-recently-updated entry is evicted first. This is a defensive bound, not
-// a tuned production limit (design.md D5).
+// a tuned production limit.
 const maxScanCacheEntries = 500
 
 const (
@@ -54,7 +54,7 @@ type scanCacheEntry struct {
 // scan's own results - SARIF artifactLocation.uri for SAST, the scan's
 // reported manifest path (DisplayTargetFile/Path) for SCA - not by the tool
 // call's own path argument. Both scan types are keyed symmetrically by file
-// path (design.md D2). Files the scan didn't report on are left untouched;
+// path. Files the scan didn't report on are left untouched;
 // only files present in this scan's results are upserted, and each upsert
 // fully replaces that file's previous record with this scan's findings.
 //
@@ -68,10 +68,9 @@ type scanCacheEntry struct {
 // for every file already cached (of the same scan type) within that
 // directory tree, on the assumption - true for this tool's default
 // all_projects/recursive scanning - that a directory scan comprehensively
-// covers its own scope. Found via manual end-to-end testing (task 6.5): a
-// genuinely successful fix was tagged verification=mismatch because the
-// cache never learned its file, then its containing directory, had become
-// clean.
+// covers its own scope. Without this, a genuinely successful fix could be
+// tagged verification=mismatch because the cache never learned its file,
+// then its containing directory, had become clean.
 func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, includeIgnores bool) {
 	var scanType string
 	var issues []types.IssueData
@@ -186,7 +185,7 @@ func (m *McpLLMBinding) evictLeastRecentlyUpdatedLocked() {
 
 // verificationState is the per-call tag attached to a snyk_send_feedback
 // analytics event, summarizing how well fixedIssueIds/preventedIssueIds claims
-// checked out against the scan-result cache (design.md D4).
+// checked out against the scan-result cache.
 type verificationState string
 
 const (
@@ -196,8 +195,7 @@ const (
 )
 
 // verificationPrecedence orders states from weakest to strongest signal for
-// the worst-case reduction below: mismatch > unverifiable > verified
-// (design.md D4).
+// the worst-case reduction below: mismatch > unverifiable > verified.
 var verificationPrecedence = map[verificationState]int{
 	verificationVerified:     1,
 	verificationUnverifiable: 2,
@@ -206,7 +204,7 @@ var verificationPrecedence = map[verificationState]int{
 
 // verifyIDs resolves a single event-level verification state for a combined
 // list of fixedIssueIds/preventedIssueIds by determining each ID's individual
-// state and reducing by worst-case precedence (design.md D4). Returns "" when
+// state and reducing by worst-case precedence. Returns "" when
 // ids is empty, signaling callers should omit the verification tag entirely
 // since there is nothing to verify.
 func (m *McpLLMBinding) verifyIDs(ids []string) verificationState {
@@ -229,8 +227,8 @@ func (m *McpLLMBinding) verifyIDs(ids []string) verificationState {
 
 // verifyIDLocked determines the verification state of a single claimed ID by
 // scanning the freshest cached record of every cached file of the relevant
-// scan type (design.md D2: IDs carry no file information, so there is no
-// single "its file" record to check). Callers must hold scanCacheMu.
+// scan type (IDs carry no file information, so there is no single "its file"
+// record to check). Callers must hold scanCacheMu.
 func (m *McpLLMBinding) verifyIDLocked(id string) verificationState {
 	scanType, ok := scanTypeFromID(id)
 	if !ok {

@@ -2056,6 +2056,45 @@ func TestSnykSendFeedbackHandler_Verification(t *testing.T) {
 	})
 }
 
+// TestSnykSendFeedbackHandler_PreventedIssuesBySeverityLiteralKey guards
+// against the specific drift task 6.4 calls out: the secure-at-inception
+// Stop Hook (studio-internal) generates `snyk_send_feedback` instruction text
+// with the literal argument name "preventedIssuesBySeverity", and this
+// handler must parse that exact literal key. Unlike
+// TestBuildSendFeedbackExtension, which exercises buildSendFeedbackExtension
+// directly via the internal sendFeedbackParams struct, this test goes through
+// the actual MCP request args map — the same shape an LLM following the Stop
+// Hook's instruction text would send — so a rename on either side (without a
+// matching rename here) fails this test.
+func TestSnykSendFeedbackHandler_PreventedIssuesBySeverityLiteralKey(t *testing.T) {
+	fixture := setupTestFixture(t)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+	require.NotNil(t, toolDef)
+	capture := fixture.allowAnalyticsDispatch()
+	handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+	capture.add(1)
+	req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+		"preventedIssuesCount":     float64(3),
+		"fixedExistingIssuesCount": float64(0),
+		"path":                     "/repo",
+		"preventedIssuesBySeverity": map[string]interface{}{
+			"critical": float64(1),
+			"high":     float64(2),
+		},
+	}}}
+	result, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	capture.wait()
+
+	payloads := capture.all()
+	require.Len(t, payloads, 1)
+	require.Contains(t, string(payloads[0]), `"mcp::preventedIssuesBySeverity"`)
+	require.Contains(t, string(payloads[0]), `"critical":1`)
+	require.Contains(t, string(payloads[0]), `"high":2`)
+}
+
 func TestCoerceStringSlice(t *testing.T) {
 	t.Run("NilInput", func(t *testing.T) {
 		require.Nil(t, coerceStringSlice(nil))
@@ -2131,16 +2170,91 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 		require.Contains(t, buf.String(), "does not match")
 	})
 
-	t.Run("VerificationIncludedWhenPresent", func(t *testing.T) {
-		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 1, verification: verificationVerified})
+	t.Run("RichnessFieldsAllOmittedWhenAbsent", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 1})
+		for _, key := range []string{
+			"mcp::fixedIssuesBySeverity", "mcp::preventedIssuesBySeverity", "mcp::fixedIssuesByScanType",
+			"mcp::outcome", "mcp::breakabilityRisk", "mcp::breakabilityRiskSource", "mcp::strategy",
+			"mcp::testsPassed", "mcp::verification",
+		} {
+			_, has := ext[key]
+			require.False(t, has, "%s must be omitted when not provided", key)
+		}
+	})
+
+	t.Run("RichnessFieldsIncludedWhenPresent", func(t *testing.T) {
+		testsPassed := true
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{
+			preventedCount:            1,
+			fixedIssuesBySeverity:     map[string]int{"high": 1},
+			preventedIssuesBySeverity: map[string]int{"critical": 2},
+			fixedIssuesByScanType:     map[string]int{"sast": 1, "sca": 1},
+			outcome:                   "applied",
+			breakabilityRisk:          "low",
+			breakabilityRiskSource:    "api",
+			strategy:                  "A",
+			testsPassed:               &testsPassed,
+			verification:              verificationVerified,
+		})
+		require.Equal(t, map[string]int{"high": 1}, ext["mcp::fixedIssuesBySeverity"])
+		require.Equal(t, map[string]int{"critical": 2}, ext["mcp::preventedIssuesBySeverity"])
+		require.Equal(t, map[string]int{"sast": 1, "sca": 1}, ext["mcp::fixedIssuesByScanType"])
+		require.Equal(t, "applied", ext["mcp::outcome"])
+		require.Equal(t, "low", ext["mcp::breakabilityRisk"])
+		require.Equal(t, "api", ext["mcp::breakabilityRiskSource"])
+		require.Equal(t, "A", ext["mcp::strategy"])
+		require.Equal(t, true, ext["mcp::testsPassed"])
 		require.Equal(t, "verified", ext["mcp::verification"])
 	})
 
-	t.Run("VerificationOmittedWhenAbsent", func(t *testing.T) {
-		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 1})
-		_, has := ext["mcp::verification"]
-		require.False(t, has)
+	t.Run("FixedAndPreventedSeverityBreakdownsAreDistinctFields", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{
+			preventedCount:            1,
+			remediatedCount:           1,
+			fixedIssuesBySeverity:     map[string]int{"low": 1},
+			preventedIssuesBySeverity: map[string]int{"low": 2},
+		})
+		require.Equal(t, map[string]int{"low": 1}, ext["mcp::fixedIssuesBySeverity"])
+		require.Equal(t, map[string]int{"low": 2}, ext["mcp::preventedIssuesBySeverity"])
 	})
+}
+
+func TestCoerceBreakdown(t *testing.T) {
+	t.Run("NonObjectInput", func(t *testing.T) {
+		require.Nil(t, coerceBreakdown("not an object", severityBreakdownKeys))
+		require.Nil(t, coerceBreakdown(nil, severityBreakdownKeys))
+	})
+
+	t.Run("EmptyObject", func(t *testing.T) {
+		require.Nil(t, coerceBreakdown(map[string]any{}, severityBreakdownKeys))
+	})
+
+	t.Run("OnlyRecognizedKeysKept", func(t *testing.T) {
+		got := coerceBreakdown(map[string]any{
+			"critical": float64(1),
+			"unknown":  float64(9),
+		}, severityBreakdownKeys)
+		require.Equal(t, map[string]int{"critical": 1}, got)
+	})
+
+	t.Run("NonNumericValueDropped", func(t *testing.T) {
+		got := coerceBreakdown(map[string]any{"sast": "not a number", "sca": float64(2)}, scanTypeBreakdownKeys)
+		require.Equal(t, map[string]int{"sca": 2}, got)
+	})
+}
+
+func TestCoerceOptionalString(t *testing.T) {
+	require.Equal(t, "", coerceOptionalString(nil))
+	require.Equal(t, "", coerceOptionalString(42))
+	require.Equal(t, "applied", coerceOptionalString("applied"))
+}
+
+func TestCoerceOptionalBoolPtr(t *testing.T) {
+	require.Nil(t, coerceOptionalBoolPtr(nil))
+	require.Nil(t, coerceOptionalBoolPtr("not a bool"))
+	got := coerceOptionalBoolPtr(true)
+	require.NotNil(t, got)
+	require.True(t, *got)
 }
 
 func TestHandleFileOutput(t *testing.T) {

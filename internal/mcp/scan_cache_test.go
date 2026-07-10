@@ -133,10 +133,9 @@ func TestUpdateScanCache_LaterNarrowerScanOverwritesSameFile(t *testing.T) {
 }
 
 func TestUpdateScanCache_CleanSingleFileRescanClearsStaleVulnerableRecord(t *testing.T) {
-	// Regression test for a bug found via manual end-to-end testing (task
-	// 6.5): a genuinely clean re-scan targeted at a single just-fixed file
-	// must supersede an earlier scan's stale, still-vulnerable record for
-	// that same file, even though the clean scan reports zero issues (a
+	// Regression test: a genuinely clean re-scan targeted at a single
+	// just-fixed file must supersede an earlier scan's stale, still-vulnerable
+	// record for that same file, even though the clean scan reports zero issues (a
 	// zero-issue result previously produced no idsByFile entries at all, so
 	// the stale record was never superseded and verification wrongly read
 	// "mismatch" for a fix that had actually succeeded).
@@ -171,9 +170,9 @@ func TestUpdateScanCache_CleanSingleFileRescanClearsStaleVulnerableRecord(t *tes
 
 func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *testing.T) {
 	// Regression test for the directory-scoped counterpart to the single-file
-	// bug above, found via manual end-to-end testing (task 6.5): an SCA
-	// validation re-scan targeted at the whole project directory (the normal
-	// shape for snyk_sca_scan, unlike a single-file SAST re-scan) reported
+	// bug above: an SCA validation re-scan targeted at the whole project
+	// directory (the normal shape for snyk_sca_scan, unlike a single-file
+	// SAST re-scan) reported
 	// zero issues after a dependency fix, but the discovery scan's stale
 	// go.mod finding was never cleared because a directory-targeted,
 	// zero-issue scan produced no idsByFile entries to upsert at all.
@@ -379,8 +378,8 @@ func TestVerifyIDs_EmptyListOmitsVerification(t *testing.T) {
 
 func TestVerifyIDs_ColdCacheAtSessionStartIsUnverifiable(t *testing.T) {
 	// No scan has run yet in this process: the cache is entirely empty, not
-	// just missing the relevant scan type. Per design.md D4, this must
-	// resolve to unverifiable, never verified.
+	// just missing the relevant scan type. This must resolve to unverifiable,
+	// never verified.
 	binding := newCacheTestBinding()
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{"sast:javascript/SqlInjection"}))
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{"sca:SNYK-JS-LODASH-1234567"}))
