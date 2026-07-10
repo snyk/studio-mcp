@@ -402,3 +402,45 @@ func TestStart(t *testing.T) {
 		})
 	})
 }
+
+// TestMintCorrelationID covers the "Session-scoped correlation ID on feedback
+// events" requirement (specs/snyk-fix-feedback-verification): one correlation
+// ID is minted per process and reused for the rest of that process's
+// lifetime, while a different process (a different McpLLMBinding here) gets
+// its own distinct ID.
+func TestMintCorrelationID(t *testing.T) {
+	t.Run("mints a non-empty ID", func(t *testing.T) {
+		binding := NewMcpLLMBinding()
+		require.Empty(t, binding.correlationID, "correlationID must be unset before minting")
+
+		binding.mintCorrelationID()
+
+		require.NotEmpty(t, binding.correlationID)
+	})
+
+	t.Run("two feedback calls in the same process (same binding) share one correlation ID", func(t *testing.T) {
+		binding := NewMcpLLMBinding()
+
+		binding.mintCorrelationID()
+		first := binding.correlationID
+
+		// Simulates a second call within the same session/process reading the
+		// same session-scoped ID; minting must be idempotent.
+		binding.mintCorrelationID()
+		second := binding.correlationID
+
+		require.Equal(t, first, second)
+	})
+
+	t.Run("two different sessions (different bindings) get different correlation IDs", func(t *testing.T) {
+		bindingA := NewMcpLLMBinding()
+		bindingB := NewMcpLLMBinding()
+
+		bindingA.mintCorrelationID()
+		bindingB.mintCorrelationID()
+
+		require.NotEmpty(t, bindingA.correlationID)
+		require.NotEmpty(t, bindingB.correlationID)
+		require.NotEqual(t, bindingA.correlationID, bindingB.correlationID)
+	})
+}
