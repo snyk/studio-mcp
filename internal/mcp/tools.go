@@ -319,6 +319,12 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 			}
 		}
 
+		// Success path: upsert the scan-result cache (design.md D2) before enhancing
+		// output, since enhancement re-shapes `output` into the LLM-facing format.
+		if success && (toolDef.Name == ToolName.CodeTest || toolDef.Name == ToolName.ScaTest) {
+			m.updateScanCache(&logger, toolDef, output, workingDir, includeIgnores)
+		}
+
 		// Success path: enhance output and handle file output
 		output = m.enhanceOutput(&logger, toolDef, output, success, workingDir, includeIgnores)
 		return m.handleSuccessOutput(invocationCtx, logger, workingDir, toolDef, output)
@@ -510,6 +516,7 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 		}
 
 		preventedIDs := coerceStringSlice(args["preventedIssueIds"])
+		fixedIDs := coerceStringSlice(args["fixedIssueIds"])
 
 		if preventedCount == 0 && remediatedCount == 0 {
 			return mcp.NewToolResultText("No issues to send feedback for"), nil
@@ -518,8 +525,23 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 		clientInfo := ClientInfoFromContext(ctx)
 
 		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
+
+		// Verification never blocks or delays the call (design.md D4): it only
+		// annotates the emitted event with a best-effort check of the claimed
+		// IDs against the scan-result cache.
+		combinedIDs := make([]string, 0, len(preventedIDs)+len(fixedIDs))
+		combinedIDs = append(combinedIDs, preventedIDs...)
+		combinedIDs = append(combinedIDs, fixedIDs...)
+		verification := m.verifyIDs(combinedIDs)
+
 		event := analytics.NewAnalyticsEventParam("Send feedback", nil, types.FilePath(path), m.correlationID)
-		event.Extension = buildSendFeedbackExtension(&logger, int(preventedCount), int(remediatedCount), preventedIDs)
+		event.Extension = buildSendFeedbackExtension(&logger, sendFeedbackParams{
+			preventedCount:  int(preventedCount),
+			remediatedCount: int(remediatedCount),
+			preventedIDs:    preventedIDs,
+			fixedIDs:        fixedIDs,
+			verification:    verification,
+		})
 		go analytics.SendAnalytics(invocationCtx.GetEngine(), "", event, nil)
 
 		return mcp.NewToolResultText("Successfully sent feedback"), nil
@@ -542,22 +564,45 @@ func coerceStringSlice(v any) []string {
 	return out
 }
 
+// sendFeedbackParams holds every optional/required argument parsed from a
+// snyk_send_feedback call, used to build the analytics event Extension map.
+type sendFeedbackParams struct {
+	preventedCount  int
+	remediatedCount int
+	preventedIDs    []string
+	fixedIDs        []string
+	verification    verificationState
+}
+
 // buildSendFeedbackExtension builds the analytics event Extension map for snyk_send_feedback.
-// Logs a warning when the supplied preventedIssueIds length disagrees with preventedCount;
-// the count remains authoritative for the metric.
-func buildSendFeedbackExtension(logger *zerolog.Logger, preventedCount, remediatedCount int, preventedIDs []string) map[string]any {
-	if logger != nil && len(preventedIDs) > 0 && len(preventedIDs) != preventedCount {
+// Logs a warning when the supplied preventedIssueIds/fixedIssueIds length disagrees with its
+// corresponding count; the count remains authoritative for the metric.
+func buildSendFeedbackExtension(logger *zerolog.Logger, p sendFeedbackParams) map[string]any {
+	if logger != nil && len(p.preventedIDs) > 0 && len(p.preventedIDs) != p.preventedCount {
 		logger.Warn().
-			Int("preventedIssuesCount", preventedCount).
-			Int("preventedIssueIdsLen", len(preventedIDs)).
+			Int("preventedIssuesCount", p.preventedCount).
+			Int("preventedIssueIdsLen", len(p.preventedIDs)).
 			Msg("preventedIssueIds length does not match preventedIssuesCount; count is authoritative")
 	}
-	ext := map[string]any{
-		"mcp::preventedIssuesCount":  preventedCount,
-		"mcp::remediatedIssuesCount": remediatedCount,
+	if logger != nil && len(p.fixedIDs) > 0 && len(p.fixedIDs) != p.remediatedCount {
+		logger.Warn().
+			Int("fixedExistingIssuesCount", p.remediatedCount).
+			Int("fixedIssueIdsLen", len(p.fixedIDs)).
+			Msg("fixedIssueIds length does not match fixedExistingIssuesCount; count is authoritative")
 	}
-	if len(preventedIDs) > 0 {
-		ext["mcp::preventedIssueIds"] = preventedIDs
+
+	ext := map[string]any{
+		"mcp::preventedIssuesCount":  p.preventedCount,
+		"mcp::remediatedIssuesCount": p.remediatedCount,
+	}
+	if len(p.preventedIDs) > 0 {
+		ext["mcp::preventedIssueIds"] = p.preventedIDs
+	}
+	if len(p.fixedIDs) > 0 {
+		ext["mcp::fixedIssueIds"] = p.fixedIDs
+	}
+	if p.verification != "" {
+		ext["mcp::verification"] = string(p.verification)
 	}
 	return ext
 }

@@ -69,6 +69,18 @@ type McpLLMBinding struct {
 	// set once, before the server starts accepting tool calls, and is
 	// thereafter only read, so it needs no dedicated lock.
 	correlationID string
+
+	// scanCacheMu guards scanCache. It is intentionally separate from mutex
+	// above, which only guards Start/Started lifecycle state (design.md D5).
+	scanCacheMu sync.Mutex
+	// scanCache is an in-process cache of the freshest scan findings observed
+	// per file path, populated by defaultHandler after successful
+	// snyk_code_scan/snyk_sca_scan calls and consulted by snykSendFeedback to
+	// verify fixedIssueIds/preventedIssueIds claims (design.md D2). Keyed by
+	// file path extracted from each scan's own results, not the tool call's
+	// path argument. Bounded to maxScanCacheEntries, evicting the
+	// least-recently-updated entry first (design.md D5).
+	scanCache map[string]*scanCacheEntry
 }
 
 func NewMcpLLMBinding(opts ...Option) *McpLLMBinding {
