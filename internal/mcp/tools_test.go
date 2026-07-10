@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -1890,6 +1891,172 @@ func TestSnykSendFeedbackHandler_CorrelationID(t *testing.T) {
 	require.Contains(t, string(payloads[1]), expectedURN)
 }
 
+// TestSnykSendFeedbackHandler_Verification covers the
+// "Verification state on feedback claims" spec requirement: verified,
+// unverifiable, mismatch, and the mixed-ID worst-case-precedence scenario, all
+// via the actual snykSendFeedback handler, always succeeding regardless of
+// the resolved state.
+func TestSnykSendFeedbackHandler_Verification(t *testing.T) {
+	newFixtureWithCache := func(t *testing.T) *testFixture {
+		fixture := setupTestFixture(t)
+		fixture.binding.scanCache = map[string]*scanCacheEntry{
+			"/repo/src/db.ts": {
+				scanType:  scanTypeSAST,
+				ids:       map[string]struct{}{"sast:javascript/OtherRule": {}},
+				updatedAt: time.Now(),
+			},
+			"/repo/package.json": {
+				scanType:  scanTypeSCA,
+				ids:       map[string]struct{}{"sca:SNYK-JS-LODASH-1234567": {}},
+				updatedAt: time.Now(),
+			},
+		}
+		return fixture
+	}
+
+	t.Run("verified", func(t *testing.T) {
+		fixture := newFixtureWithCache(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+		capture := fixture.allowAnalyticsDispatch()
+		handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+		capture.add(1)
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(0),
+			"fixedExistingIssuesCount": float64(1),
+			"path":                     "/repo",
+			// Absent from the SAST cache entry above -> confirmed fixed.
+			"fixedIssueIds": []any{"sast:javascript/SqlInjection"},
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		capture.wait()
+
+		payloads := capture.all()
+		require.Len(t, payloads, 1)
+		require.Contains(t, string(payloads[0]), `"mcp::verification":"verified"`)
+	})
+
+	t.Run("unverifiable: no cached file of the relevant scan type", func(t *testing.T) {
+		fixture := setupTestFixture(t) // cold cache: no scans have run yet in this process
+		toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+		capture := fixture.allowAnalyticsDispatch()
+		handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+		capture.add(1)
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(0),
+			"fixedExistingIssuesCount": float64(1),
+			"path":                     "/repo",
+			"fixedIssueIds":            []any{"sast:javascript/SqlInjection"},
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		capture.wait()
+
+		payloads := capture.all()
+		require.Len(t, payloads, 1)
+		require.Contains(t, string(payloads[0]), `"mcp::verification":"unverifiable"`)
+	})
+
+	t.Run("unverifiable: malformed/unrecognized scan-type prefix", func(t *testing.T) {
+		fixture := newFixtureWithCache(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+		capture := fixture.allowAnalyticsDispatch()
+		handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+		capture.add(1)
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(1),
+			"fixedExistingIssuesCount": float64(0),
+			"path":                     "/repo",
+			"preventedIssueIds":        []any{"typo:not-a-real-prefix"},
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		capture.wait()
+
+		payloads := capture.all()
+		require.Len(t, payloads, 1)
+		require.Contains(t, string(payloads[0]), `"mcp::verification":"unverifiable"`)
+	})
+
+	t.Run("mismatch: claimed ID still present in a cached file's freshest record", func(t *testing.T) {
+		fixture := newFixtureWithCache(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+		capture := fixture.allowAnalyticsDispatch()
+		handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+		capture.add(1)
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(0),
+			"fixedExistingIssuesCount": float64(1),
+			"path":                     "/repo",
+			"fixedIssueIds":            []any{"sast:javascript/OtherRule"}, // still present in the cache
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		capture.wait()
+
+		payloads := capture.all()
+		require.Len(t, payloads, 1)
+		require.Contains(t, string(payloads[0]), `"mcp::verification":"mismatch"`)
+	})
+
+	t.Run("mixed per-ID outcomes resolve to mismatch by worst-case precedence", func(t *testing.T) {
+		fixture := newFixtureWithCache(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+		capture := fixture.allowAnalyticsDispatch()
+		handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+		capture.add(1)
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(1),
+			"fixedExistingIssuesCount": float64(2),
+			"path":                     "/repo",
+			// One verified (absent from the SAST cache), one unverifiable
+			// (unrecognized "iac:" prefix), one mismatch (still present).
+			"fixedIssueIds":     []any{"sast:javascript/SqlInjection", "iac:not-a-scanned-type"},
+			"preventedIssueIds": []any{"sast:javascript/OtherRule"},
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		capture.wait()
+
+		payloads := capture.all()
+		require.Len(t, payloads, 1)
+		// mismatch > unverifiable > verified: the single mismatched ID above must win.
+		require.Contains(t, string(payloads[0]), `"mcp::verification":"mismatch"`)
+	})
+
+	t.Run("no IDs named: verification tag omitted", func(t *testing.T) {
+		fixture := newFixtureWithCache(t)
+		toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
+		capture := fixture.allowAnalyticsDispatch()
+		handler := fixture.binding.snykSendFeedback(fixture.invocationContext, *toolDef)
+
+		capture.add(1)
+		req := mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{
+			"preventedIssuesCount":     float64(1),
+			"fixedExistingIssuesCount": float64(0),
+			"path":                     "/repo",
+		}}}
+		result, err := handler(t.Context(), req)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		capture.wait()
+
+		payloads := capture.all()
+		require.Len(t, payloads, 1)
+		require.NotContains(t, string(payloads[0]), `"mcp::verification"`)
+	})
+}
+
 func TestCoerceStringSlice(t *testing.T) {
 	t.Run("NilInput", func(t *testing.T) {
 		require.Nil(t, coerceStringSlice(nil))
@@ -1919,7 +2086,7 @@ func TestCoerceStringSlice(t *testing.T) {
 
 func TestBuildSendFeedbackExtension(t *testing.T) {
 	t.Run("CountsOnlyNoIDs", func(t *testing.T) {
-		ext := buildSendFeedbackExtension(nil, 2, 1, nil)
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 2, remediatedCount: 1})
 		require.Equal(t, 2, ext["mcp::preventedIssuesCount"])
 		require.Equal(t, 1, ext["mcp::remediatedIssuesCount"])
 		_, hasIDs := ext["mcp::preventedIssueIds"]
@@ -1930,7 +2097,7 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 		ids := []string{"sast:javascript/SqlInjection", "sca:SNYK-JS-LODASH-1234567"}
 		var buf bytes.Buffer
 		logger := zerolog.New(&buf)
-		ext := buildSendFeedbackExtension(&logger, 2, 0, ids)
+		ext := buildSendFeedbackExtension(&logger, sendFeedbackParams{preventedCount: 2, preventedIDs: ids})
 		require.Equal(t, ids, ext["mcp::preventedIssueIds"])
 		require.Empty(t, buf.String(), "no warning expected when length matches count")
 	})
@@ -1939,15 +2106,41 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 		ids := []string{"sast:a", "sast:b"}
 		var buf bytes.Buffer
 		logger := zerolog.New(&buf)
-		ext := buildSendFeedbackExtension(&logger, 3, 0, ids)
+		ext := buildSendFeedbackExtension(&logger, sendFeedbackParams{preventedCount: 3, preventedIDs: ids})
 		require.Equal(t, ids, ext["mcp::preventedIssueIds"])
 		require.Contains(t, buf.String(), "does not match")
 	})
 
 	t.Run("EmptyIDsSliceOmittedFromExtension", func(t *testing.T) {
-		ext := buildSendFeedbackExtension(nil, 0, 0, []string{})
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedIDs: []string{}})
 		_, hasIDs := ext["mcp::preventedIssueIds"]
 		require.False(t, hasIDs)
+	})
+
+	t.Run("FixedIssueIdsMirrorsPreventedIssueIds", func(t *testing.T) {
+		ids := []string{"sast:javascript/SqlInjection"}
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{remediatedCount: 1, fixedIDs: ids})
+		require.Equal(t, ids, ext["mcp::fixedIssueIds"])
+	})
+
+	t.Run("FixedIssueIdsCountMismatchLogsWarning", func(t *testing.T) {
+		ids := []string{"sast:a", "sast:b"}
+		var buf bytes.Buffer
+		logger := zerolog.New(&buf)
+		ext := buildSendFeedbackExtension(&logger, sendFeedbackParams{remediatedCount: 1, fixedIDs: ids})
+		require.Equal(t, ids, ext["mcp::fixedIssueIds"])
+		require.Contains(t, buf.String(), "does not match")
+	})
+
+	t.Run("VerificationIncludedWhenPresent", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 1, verification: verificationVerified})
+		require.Equal(t, "verified", ext["mcp::verification"])
+	})
+
+	t.Run("VerificationOmittedWhenAbsent", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 1})
+		_, has := ext["mcp::verification"]
+		require.False(t, has)
 	})
 }
 
