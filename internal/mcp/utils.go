@@ -88,34 +88,30 @@ func buildArg(key string, param convertedToolParameter) string {
 func createToolFromDefinition(toolDef *SnykMcpToolsDefinition) mcp.Tool {
 	opts := []mcp.ToolOption{mcp.WithDescription(toolDef.Description)}
 	for _, param := range toolDef.Params {
+		propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
+		if param.IsRequired {
+			propOpts = append(propOpts, mcp.Required())
+		}
 		switch param.Type {
 		case "string":
-			if param.IsRequired {
-				opts = append(opts, mcp.WithString(param.Name, mcp.Required(), mcp.Description(param.Description)))
-			} else {
-				opts = append(opts, mcp.WithString(param.Name, mcp.Description(param.Description)))
+			if len(param.Enum) > 0 {
+				propOpts = append(propOpts, mcp.Enum(param.Enum...))
 			}
+			opts = append(opts, mcp.WithString(param.Name, propOpts...))
 		case "boolean":
-			if param.IsRequired {
-				opts = append(opts, mcp.WithBoolean(param.Name, mcp.Required(), mcp.Description(param.Description)))
-			} else {
-				opts = append(opts, mcp.WithBoolean(param.Name, mcp.Description(param.Description)))
-			}
+			opts = append(opts, mcp.WithBoolean(param.Name, propOpts...))
 		case "number":
-			if param.IsRequired {
-				opts = append(opts, mcp.WithNumber(param.Name, mcp.Required(), mcp.Description(param.Description)))
-			} else {
-				opts = append(opts, mcp.WithNumber(param.Name, mcp.Description(param.Description)))
-			}
+			opts = append(opts, mcp.WithNumber(param.Name, propOpts...))
 		case "array":
-			propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
 			if param.Items != nil {
 				propOpts = append(propOpts, mcp.Items(param.Items))
 			}
-			if param.IsRequired {
-				propOpts = append(propOpts, mcp.Required())
-			}
 			opts = append(opts, mcp.WithArray(param.Name, propOpts...))
+		case "object":
+			if param.Properties != nil {
+				propOpts = append(propOpts, mcp.Properties(param.Properties))
+			}
+			opts = append(opts, mcp.WithObject(param.Name, propOpts...))
 		}
 	}
 
