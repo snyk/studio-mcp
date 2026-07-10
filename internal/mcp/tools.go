@@ -107,6 +107,8 @@ type SnykMcpToolParameter struct {
 	Name             string         `json:"name"`
 	Type             string         `json:"type"`
 	Items            map[string]any `json:"items,omitempty"`
+	Properties       map[string]any `json:"properties,omitempty"`
+	Enum             []string       `json:"enum,omitempty"`
 	IsRequired       bool           `json:"isRequired"`
 	Description      string         `json:"description"`
 	SupersedesParams []string       `json:"supersedesParams"`

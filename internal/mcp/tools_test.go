@@ -2516,9 +2516,9 @@ func TestSnykBreakabilityHandler_SuccessfulResponse(t *testing.T) {
 						"type": "breakability",
 						"attributes": map[string]interface{}{
 							"package_upgrade": map[string]interface{}{
-								"name":          "express",
-								"from_version":  "4.18.0",
-								"to_version":    "5.0.0",
+								"name":         "express",
+								"from_version": "4.18.0",
+								"to_version":   "5.0.0",
 							},
 							"risk_level": tc.riskLevel,
 							"summary":    tc.summary,
