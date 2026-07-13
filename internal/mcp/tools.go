@@ -543,10 +543,10 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 			fixedIssuesBySeverity:     coerceBreakdown(args["fixedIssuesBySeverity"], severityBreakdownKeys),
 			preventedIssuesBySeverity: coerceBreakdown(args["preventedIssuesBySeverity"], severityBreakdownKeys),
 			fixedIssuesByScanType:     coerceBreakdown(args["fixedIssuesByScanType"], scanTypeBreakdownKeys),
-			outcome:                   coerceOptionalString(args["outcome"]),
-			breakabilityRisk:          coerceOptionalString(args["breakabilityRisk"]),
-			breakabilityRiskSource:    coerceOptionalString(args["breakabilityRiskSource"]),
-			strategy:                  coerceOptionalString(args["strategy"]),
+			outcome:                   mcp.ExtractString(args, "outcome"),
+			breakabilityRisk:          mcp.ExtractString(args, "breakabilityRisk"),
+			breakabilityRiskSource:    mcp.ExtractString(args, "breakabilityRiskSource"),
+			strategy:                  mcp.ExtractString(args, "strategy"),
 			testsPassed:               coerceOptionalBoolPtr(args["testsPassed"]),
 			verification:              verification,
 		})
@@ -577,11 +577,12 @@ var (
 	scanTypeBreakdownKeys = []string{"sast", "sca"}
 )
 
-// coerceBreakdown converts a JSON-decoded object argument (`map[string]any`) into
-// a `map[string]int`, keeping only the supplied keys and only values that decode
-// as numbers. Returns nil when the input isn't an object or no recognized key is
-// present, so callers can omit the extension key entirely rather than sending an
-// empty map.
+// coerceBreakdown converts a JSON-decoded object argument (`map[string]any`)
+// into a `map[string]int`, keeping only the supplied keys and only values
+// that decode as numbers.
+// Returns nil when the input isn't an object or no recognized key is
+// present, so callers can omit the extension key entirely rather than
+// sending an empty map.
 func coerceBreakdown(v any, keys []string) map[string]int {
 	raw, ok := v.(map[string]any)
 	if !ok {
@@ -601,13 +602,6 @@ func coerceBreakdown(v any, keys []string) map[string]int {
 		return nil
 	}
 	return out
-}
-
-// coerceOptionalString returns v as a string, or "" when v isn't a string
-// (including when it's absent/nil).
-func coerceOptionalString(v any) string {
-	s, _ := v.(string)
-	return s
 }
 
 // coerceOptionalBoolPtr returns a pointer to v's bool value, or nil when v
@@ -639,10 +633,13 @@ type sendFeedbackParams struct {
 	verification              verificationState
 }
 
-// buildSendFeedbackExtension builds the analytics event Extension map for snyk_send_feedback.
-// Logs a warning when the supplied preventedIssueIds/fixedIssueIds length disagrees with its
-// corresponding count; the count remains authoritative for the metric. All richness fields are
-// optional and are only added to the extension map when present.
+// buildSendFeedbackExtension builds the analytics event Extension map for
+// snyk_send_feedback.
+// Logs a warning when the supplied preventedIssueIds/fixedIssueIds length
+// disagrees with its corresponding count; the count remains authoritative
+// for the metric.
+// All richness fields are optional and are only added to the extension map
+// when present.
 func buildSendFeedbackExtension(logger *zerolog.Logger, p sendFeedbackParams) map[string]any {
 	if logger != nil && len(p.preventedIDs) > 0 && len(p.preventedIDs) != p.preventedCount {
 		logger.Warn().

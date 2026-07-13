@@ -28,10 +28,11 @@ import (
 	"github.com/snyk/studio-mcp/internal/types"
 )
 
-// maxScanCacheEntries caps the scan-result cache at the 500 most-recently-updated
-// files. When a new distinct file path would exceed the cap, the
-// least-recently-updated entry is evicted first. This is a defensive bound, not
-// a tuned production limit.
+// maxScanCacheEntries caps the scan-result cache at the 500 most-recently
+// updated files.
+// When a new distinct file path would exceed the cap, the least-recently
+// updated entry is evicted first.
+// This is a defensive bound, not a tuned production limit.
 const maxScanCacheEntries = 500
 
 const (
@@ -51,26 +52,30 @@ type scanCacheEntry struct {
 }
 
 // updateScanCache upserts one cache entry per file path found in a successful
-// scan's own results - SARIF artifactLocation.uri for SAST, the scan's
-// reported manifest path (DisplayTargetFile/Path) for SCA - not by the tool
-// call's own path argument. Both scan types are keyed symmetrically by file
-// path. Files the scan didn't report on are left untouched;
-// only files present in this scan's results are upserted, and each upsert
-// fully replaces that file's previous record with this scan's findings.
+// scan's own results (SARIF artifactLocation.uri for SAST, the scan's
+// reported manifest path (DisplayTargetFile/Path) for SCA), not by the tool
+// call's own path argument.
+// Both scan types are keyed symmetrically by file path.
+// Files the scan didn't report on are left untouched; only files present in
+// this scan's results are upserted, and each upsert fully replaces that
+// file's previous record with this scan's findings.
 //
 // The tool call's own workDir argument additionally seeds cache upserts for
 // files/directories that a fresh, clean scan covers but reported no issues
-// for - without this, a scan that becomes clean could never supersede an
-// earlier scan's stale, still-vulnerable record for the same scope, since a
-// scan with fewer (or zero) issues produces fewer (or no) idsByFile entries
-// on its own. When workDir is a single file, that scan is authoritative for
-// that exact file. When workDir is a directory, that scan is authoritative
-// for every file already cached (of the same scan type) within that
-// directory tree, on the assumption - true for this tool's default
-// all_projects/recursive scanning - that a directory scan comprehensively
-// covers its own scope. Without this, a genuinely successful fix could be
-// tagged verification=mismatch because the cache never learned its file,
-// then its containing directory, had become clean.
+// for.
+// Without this, a scan that becomes clean could never supersede an earlier
+// scan's stale, still-vulnerable record for the same scope, since a scan
+// with fewer (or zero) issues produces fewer (or no) idsByFile entries on
+// its own.
+// When workDir is a single file, that scan is authoritative for that exact
+// file.
+// When workDir is a directory, that scan is authoritative for every file
+// already cached (of the same scan type) within that directory tree, on the
+// assumption (true for this tool's default all_projects/recursive scanning)
+// that a directory scan comprehensively covers its own scope.
+// Without this, a genuinely successful fix could be tagged
+// verification=mismatch because the cache never learned its file, then its
+// containing directory, had become clean.
 func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, includeIgnores bool) {
 	var scanType string
 	var issues []types.IssueData
@@ -166,7 +171,8 @@ func isWithinDir(filePath, dir string) bool {
 }
 
 // evictLeastRecentlyUpdatedLocked removes the entry with the oldest updatedAt
-// timestamp. Callers must hold scanCacheMu.
+// timestamp.
+// Callers must hold scanCacheMu.
 func (m *McpLLMBinding) evictLeastRecentlyUpdatedLocked() {
 	var oldestKey string
 	var oldestTime time.Time
@@ -204,9 +210,9 @@ var verificationPrecedence = map[verificationState]int{
 
 // verifyIDs resolves a single event-level verification state for a combined
 // list of fixedIssueIds/preventedIssueIds by determining each ID's individual
-// state and reducing by worst-case precedence. Returns "" when
-// ids is empty, signaling callers should omit the verification tag entirely
-// since there is nothing to verify.
+// state and reducing by worst-case precedence.
+// Returns "" when ids is empty, signaling callers should omit the
+// verification tag entirely since there is nothing to verify.
 func (m *McpLLMBinding) verifyIDs(ids []string) verificationState {
 	if len(ids) == 0 {
 		return ""
@@ -228,7 +234,8 @@ func (m *McpLLMBinding) verifyIDs(ids []string) verificationState {
 // verifyIDLocked determines the verification state of a single claimed ID by
 // scanning the freshest cached record of every cached file of the relevant
 // scan type (IDs carry no file information, so there is no single "its file"
-// record to check). Callers must hold scanCacheMu.
+// record to check).
+// Callers must hold scanCacheMu.
 func (m *McpLLMBinding) verifyIDLocked(id string) verificationState {
 	scanType, ok := scanTypeFromID(id)
 	if !ok {

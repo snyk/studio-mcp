@@ -47,12 +47,13 @@ type EventParam struct {
 	InteractionUUID string         `json:"interactionId"`
 }
 
-// NewAnalyticsEventParam builds a new analytics event. correlationID, when
-// non-empty, is stamped on the event as its InteractionUUID so that events
-// sharing a correlationID (e.g. a session-scoped ID minted once per MCP
-// process) can be joined downstream, instead of each call minting its own
-// fresh random ID. Pass an empty string to preserve the previous behavior of
-// letting PayloadForAnalyticsEventParam mint a fresh UUID for this event.
+// NewAnalyticsEventParam builds a new analytics event.
+// correlationID, when non-empty, is stamped on the event as its
+// InteractionUUID so that events sharing a correlationID (e.g. a
+// session-scoped ID minted once per MCP process) can be joined downstream,
+// instead of each call minting its own fresh random ID.
+// Pass an empty string to preserve the previous behavior of letting
+// PayloadForAnalyticsEventParam mint a fresh UUID for this event.
 func NewAnalyticsEventParam(interactionType string, err error, path types.FilePath, correlationID string) EventParam {
 	status := string(analytics.Success)
 	if err != nil {

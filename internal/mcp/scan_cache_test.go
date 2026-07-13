@@ -40,10 +40,6 @@ func newCacheTestBinding() *McpLLMBinding {
 	return NewMcpLLMBinding()
 }
 
-// -----------------------------------------------------------------------
-// Task 3.2 / 6.2: cache upsert keyed by file path found in scan results.
-// -----------------------------------------------------------------------
-
 func TestUpdateScanCache_SASTKeyedByResultFilePath(t *testing.T) {
 	binding := newCacheTestBinding()
 	toolDef := SnykMcpToolsDefinition{Name: ToolName.CodeTest}
@@ -184,8 +180,9 @@ func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *test
 	require.NoError(t, os.WriteFile(manifestPath, []byte("module example\n"), 0o600))
 
 	// displayTargetFile is the lockfile (go.sum), which getAbsTargetFilePath
-	// resolves to the sibling manifest (go.mod) joined against workDir - same
-	// resolution TestUpdateScanCache_SCAKeyedByManifestPath relies on.
+	// resolves to the sibling manifest (go.mod) joined against workDir.
+	// This is the same resolution TestUpdateScanCache_SCAKeyedByManifestPath
+	// relies on.
 	vulnerableOssJSON := `{
 		"vulnerabilities": [{"id":"SNYK-GOLANG-STDNETHTTP-16535158","packageName":"std/net/http","version":"1.26.0"}],
 		"displayTargetFile": "go.sum"
@@ -291,10 +288,6 @@ func TestUpdateScanCache_IgnoresUnrelatedToolsAndMalformedOutput(t *testing.T) {
 	})
 }
 
-// -----------------------------------------------------------------------
-// Task 3.3 / 6.2: 500-entry cap, evicting least-recently-updated first.
-// -----------------------------------------------------------------------
-
 func TestScanCacheEviction_501stDistinctFileEvictsLeastRecentlyUpdated(t *testing.T) {
 	binding := newCacheTestBinding()
 	toolDef := SnykMcpToolsDefinition{Name: ToolName.CodeTest}
@@ -365,11 +358,6 @@ func TestScanCacheEviction_ReUpsertingExistingFileDoesNotEvict(t *testing.T) {
 	_, hasNewID := entry.ids["sast:javascript/RuleV2"]
 	require.True(t, hasNewID, "the re-scanned file's record must reflect the newer findings")
 }
-
-// -----------------------------------------------------------------------
-// Task 3.4 / 3.5 / 6.3: per-ID verification state and worst-case precedence.
-// -----------------------------------------------------------------------
-
 func TestVerifyIDs_EmptyListOmitsVerification(t *testing.T) {
 	binding := newCacheTestBinding()
 	require.Equal(t, verificationState(""), binding.verifyIDs(nil))
@@ -378,8 +366,8 @@ func TestVerifyIDs_EmptyListOmitsVerification(t *testing.T) {
 
 func TestVerifyIDs_ColdCacheAtSessionStartIsUnverifiable(t *testing.T) {
 	// No scan has run yet in this process: the cache is entirely empty, not
-	// just missing the relevant scan type. This must resolve to unverifiable,
-	// never verified.
+	// just missing the relevant scan type.
+	// This must resolve to unverifiable, never verified.
 	binding := newCacheTestBinding()
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{"sast:javascript/SqlInjection"}))
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{"sca:SNYK-JS-LODASH-1234567"}))

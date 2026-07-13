@@ -65,21 +65,23 @@ type McpLLMBinding struct {
 
 	// correlationID is a session-scoped identifier minted once per process in
 	// Start() and stamped on every snyk_send_feedback analytics event, so
-	// events from the same MCP session can be correlated. It is
-	// set once, before the server starts accepting tool calls, and is
+	// events from the same MCP session can be correlated.
+	// It is set once, before the server starts accepting tool calls, and is
 	// thereafter only read, so it needs no dedicated lock.
 	correlationID string
 
-	// scanCacheMu guards scanCache. It is intentionally separate from mutex
-	// above, which only guards Start/Started lifecycle state.
+	// scanCacheMu guards scanCache.
+	// It is intentionally separate from mutex above, which only guards
+	// Start/Started lifecycle state.
 	scanCacheMu sync.Mutex
 	// scanCache is an in-process cache of the freshest scan findings observed
 	// per file path, populated by defaultHandler after successful
 	// snyk_code_scan/snyk_sca_scan calls and consulted by snykSendFeedback to
-	// verify fixedIssueIds/preventedIssueIds claims. Keyed by
-	// file path extracted from each scan's own results, not the tool call's
-	// path argument. Bounded to maxScanCacheEntries, evicting the
-	// least-recently-updated entry first.
+	// verify fixedIssueIds/preventedIssueIds claims.
+	// Keyed by file path extracted from each scan's own results, not the tool
+	// call's own path argument.
+	// Bounded to maxScanCacheEntries, evicting the least-recently-updated
+	// entry first.
 	scanCache map[string]*scanCacheEntry
 }
 
@@ -98,10 +100,11 @@ func NewMcpLLMBinding(opts ...Option) *McpLLMBinding {
 }
 
 // mintCorrelationID mints the session-scoped correlation ID once per process,
-// if it hasn't been minted already. Every shipped MCP config
-// launches studio-mcp as a fresh process per IDE connection, so minting once
-// here - before any tool call can occur - is sufficient to correlate every
-// snyk_send_feedback event emitted during this session's lifetime.
+// if it hasn't been minted already.
+// Every shipped MCP config launches studio-mcp as a fresh process per IDE
+// connection, so minting once here (before any tool call can occur) is
+// sufficient to correlate every snyk_send_feedback event emitted during this
+// session's lifetime.
 func (m *McpLLMBinding) mintCorrelationID() {
 	if m.correlationID == "" {
 		m.correlationID = uuid.New().String()

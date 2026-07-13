@@ -155,8 +155,9 @@ func (c *analyticsCapture) all() [][]byte {
 // snykSendFeedback's `go analytics.SendAnalytics(...)` background call can run
 // to completion (GetLogger/GetRuntimeInfo/InvokeWithInputAndConfig are
 // otherwise unmocked and would fail the test) and captures the payload each
-// dispatch sends. Callers must call capture.add(n) before triggering n
-// dispatches, then capture.wait() before inspecting capture.all().
+// dispatch sends.
+// Callers must call capture.add(n) before triggering n dispatches, then
+// capture.wait() before inspecting capture.all().
 func (f *testFixture) allowAnalyticsDispatch() *analyticsCapture {
 	f.t.Helper()
 	capture := &analyticsCapture{}
@@ -1890,7 +1891,7 @@ func TestSnykSendFeedbackHandler_CorrelationID(t *testing.T) {
 	require.Contains(t, string(payloads[1]), expectedURN)
 }
 
-// TestSnykSendFeedbackHandler_Verification covers task 3.4/3.5 and the
+// TestSnykSendFeedbackHandler_Verification covers the
 // "Verification state on feedback claims" spec requirement: verified,
 // unverifiable, mismatch, and the mixed-ID worst-case-precedence scenario, all
 // via the actual snykSendFeedback handler, always succeeding regardless of
@@ -2057,15 +2058,15 @@ func TestSnykSendFeedbackHandler_Verification(t *testing.T) {
 }
 
 // TestSnykSendFeedbackHandler_PreventedIssuesBySeverityLiteralKey guards
-// against the specific drift task 6.4 calls out: the secure-at-inception
+// against the specific drift requirement calls out: the secure-at-inception
 // Stop Hook (studio-internal) generates `snyk_send_feedback` instruction text
 // with the literal argument name "preventedIssuesBySeverity", and this
-// handler must parse that exact literal key. Unlike
-// TestBuildSendFeedbackExtension, which exercises buildSendFeedbackExtension
-// directly via the internal sendFeedbackParams struct, this test goes through
-// the actual MCP request args map — the same shape an LLM following the Stop
-// Hook's instruction text would send — so a rename on either side (without a
-// matching rename here) fails this test.
+// handler must parse that exact literal key.
+// Unlike TestBuildSendFeedbackExtension, which exercises
+// buildSendFeedbackExtension directly via the internal sendFeedbackParams
+// struct, this test goes through the actual MCP request args map (the same
+// shape an LLM following the Stop Hook's instruction text would send), so a
+// rename on either side (without a matching rename here) fails this test.
 func TestSnykSendFeedbackHandler_PreventedIssuesBySeverityLiteralKey(t *testing.T) {
 	fixture := setupTestFixture(t)
 	toolDef := getToolWithName(t, fixture.tools, ToolName.SendFeedback)
@@ -2241,12 +2242,6 @@ func TestCoerceBreakdown(t *testing.T) {
 		got := coerceBreakdown(map[string]any{"sast": "not a number", "sca": float64(2)}, scanTypeBreakdownKeys)
 		require.Equal(t, map[string]int{"sca": 2}, got)
 	})
-}
-
-func TestCoerceOptionalString(t *testing.T) {
-	require.Equal(t, "", coerceOptionalString(nil))
-	require.Equal(t, "", coerceOptionalString(42))
-	require.Equal(t, "applied", coerceOptionalString("applied"))
 }
 
 func TestCoerceOptionalBoolPtr(t *testing.T) {
