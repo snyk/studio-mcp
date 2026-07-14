@@ -1899,7 +1899,7 @@ func TestSnykSendFeedbackHandler_CorrelationID(t *testing.T) {
 func TestSnykSendFeedbackHandler_Verification(t *testing.T) {
 	newFixtureWithCache := func(t *testing.T) *testFixture {
 		fixture := setupTestFixture(t)
-		fixture.binding.scanCache = map[string]*scanCacheEntry{
+		seedCache(fixture.binding, map[string]*scanCacheEntry{
 			"/repo/src/db.ts": {
 				scanType:  scanTypeSAST,
 				ids:       map[string]struct{}{"sast:javascript/OtherRule": {}},
@@ -1910,7 +1910,7 @@ func TestSnykSendFeedbackHandler_Verification(t *testing.T) {
 				ids:       map[string]struct{}{"sca:SNYK-JS-LODASH-1234567": {}},
 				updatedAt: time.Now(),
 			},
-		}
+		})
 		return fixture
 	}
 

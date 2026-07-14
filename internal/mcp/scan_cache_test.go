@@ -40,6 +40,25 @@ func newCacheTestBinding() *McpLLMBinding {
 	return NewMcpLLMBinding()
 }
 
+// cacheEntries returns the binding's cached scan entries, tolerating a cache
+// that has never been populated (scanCacheLocked stays nil until the first
+// successful scan or seeded fixture).
+func cacheEntries(b *McpLLMBinding) map[string]*scanCacheEntry {
+	if b.scanCacheLocked == nil {
+		return nil
+	}
+	return b.scanCacheLocked.entries
+}
+
+// seedCache replaces the binding's cache with the given entries, wiring the
+// same eviction cap the production code uses.
+func seedCache(b *McpLLMBinding, entries map[string]*scanCacheEntry) {
+	b.scanCacheLocked = &scanCache{
+		maxEntries: MaxScanCacheEntries,
+		entries:    entries,
+	}
+}
+
 func TestUpdateScanCache_SASTKeyedByResultFilePath(t *testing.T) {
 	binding := newCacheTestBinding()
 	toolDef := SnykMcpToolsDefinition{Name: ToolName.CodeTest}
@@ -57,15 +76,15 @@ func TestUpdateScanCache_SASTKeyedByResultFilePath(t *testing.T) {
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
 
-	require.Len(t, binding.scanCache, 2)
+	require.Len(t, cacheEntries(binding), 2)
 
-	dbEntry, ok := binding.scanCache["/repo/src/db.ts"]
+	dbEntry, ok := cacheEntries(binding)["/repo/src/db.ts"]
 	require.True(t, ok, "expected an entry keyed by the SARIF artifactLocation.uri resolved against the scan's basePath")
 	require.Equal(t, scanTypeSAST, dbEntry.scanType)
 	_, hasID := dbEntry.ids["sast:javascript/SqlInjection"]
 	require.True(t, hasID)
 
-	viewEntry, ok := binding.scanCache["/repo/src/view.ts"]
+	viewEntry, ok := cacheEntries(binding)["/repo/src/view.ts"]
 	require.True(t, ok)
 	_, hasID = viewEntry.ids["sast:javascript/XSS"]
 	require.True(t, hasID)
@@ -87,8 +106,8 @@ func TestUpdateScanCache_SCAKeyedByManifestPath(t *testing.T) {
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
 
-	require.Len(t, binding.scanCache, 1)
-	entry, ok := binding.scanCache["/repo/package.json"]
+	require.Len(t, cacheEntries(binding), 1)
+	entry, ok := cacheEntries(binding)["/repo/package.json"]
 	require.True(t, ok, "expected an entry keyed by the SCA scan's reported manifest path")
 	require.Equal(t, scanTypeSCA, entry.scanType)
 	_, hasID := entry.ids["sca:SNYK-JS-LODASH-1234567"]
@@ -120,7 +139,7 @@ func TestUpdateScanCache_LaterNarrowerScanOverwritesSameFile(t *testing.T) {
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
 
-	entry, ok := binding.scanCache["/repo/src/db.ts"]
+	entry, ok := cacheEntries(binding)["/repo/src/db.ts"]
 	require.True(t, ok)
 	_, hasOld := entry.ids["sast:javascript/SqlInjection"]
 	require.False(t, hasOld, "the stale finding from the broad scan must not survive the later, narrower scan")
@@ -150,7 +169,7 @@ func TestUpdateScanCache_CleanSingleFileRescanClearsStaleVulnerableRecord(t *tes
 	binding.updateScanCache(&nopLoggerForCache, toolDef, vulnerableSarif, dir, false)
 
 	binding.scanCacheMu.Lock()
-	_, hasVuln := binding.scanCache[filePath]
+	_, hasVuln := cacheEntries(binding)[filePath]
 	binding.scanCacheMu.Unlock()
 	require.True(t, hasVuln, "sanity check: the vulnerable finding must be cached before the clean re-scan")
 
@@ -158,7 +177,7 @@ func TestUpdateScanCache_CleanSingleFileRescanClearsStaleVulnerableRecord(t *tes
 	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanSarif, filePath, false)
 
 	binding.scanCacheMu.Lock()
-	entry, ok := binding.scanCache[filePath]
+	entry, ok := cacheEntries(binding)[filePath]
 	binding.scanCacheMu.Unlock()
 	require.True(t, ok, "the file's cache entry must still exist after the clean re-scan")
 	require.Empty(t, entry.ids, "a clean single-file re-scan must clear the stale vulnerable record")
@@ -190,7 +209,7 @@ func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *test
 	binding.updateScanCache(&nopLoggerForCache, toolDef, vulnerableOssJSON, dir, false)
 
 	binding.scanCacheMu.Lock()
-	_, hasVuln := binding.scanCache[manifestPath]
+	_, hasVuln := cacheEntries(binding)[manifestPath]
 	binding.scanCacheMu.Unlock()
 	require.True(t, hasVuln, "sanity check: the vulnerable finding must be cached before the clean re-scan")
 
@@ -198,7 +217,7 @@ func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *test
 	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanOssJSON, dir, false)
 
 	binding.scanCacheMu.Lock()
-	entry, ok := binding.scanCache[manifestPath]
+	entry, ok := cacheEntries(binding)[manifestPath]
 	binding.scanCacheMu.Unlock()
 	require.True(t, ok, "the manifest's cache entry must still exist after the clean directory re-scan")
 	require.Empty(t, entry.ids, "a clean directory re-scan must clear the stale vulnerable record for files within it")
@@ -216,20 +235,20 @@ func TestUpdateScanCache_DirectoryRescanDoesNotClearFilesOutsideItsScope(t *test
 	otherManifest := filepath.Join(otherDir, "go.mod")
 
 	binding.scanCacheMu.Lock()
-	binding.scanCache = map[string]*scanCacheEntry{
+	seedCache(binding, map[string]*scanCacheEntry{
 		otherManifest: {
 			scanType:  scanTypeSCA,
 			ids:       map[string]struct{}{"sca:SNYK-OTHER-VULN": {}},
 			updatedAt: time.Now(),
 		},
-	}
+	})
 	binding.scanCacheMu.Unlock()
 
 	cleanOssJSON := `{"vulnerabilities": [], "displayTargetFile": "go.mod"}`
 	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanOssJSON, scannedDir, false)
 
 	binding.scanCacheMu.Lock()
-	entry, ok := binding.scanCache[otherManifest]
+	entry, ok := cacheEntries(binding)[otherManifest]
 	binding.scanCacheMu.Unlock()
 	require.True(t, ok)
 	_, stillHasVuln := entry.ids["sca:SNYK-OTHER-VULN"]
@@ -249,7 +268,7 @@ func TestUpdateScanCache_FilesNotInScanResultsAreUnaffected(t *testing.T) {
 	binding.updateScanCache(&nopLoggerForCache, toolDef, first, "/repo", false)
 
 	binding.scanCacheMu.Lock()
-	before := binding.scanCache["/repo/src/other.ts"]
+	before := cacheEntries(binding)["/repo/src/other.ts"]
 	binding.scanCacheMu.Unlock()
 	require.NotNil(t, before)
 
@@ -262,7 +281,7 @@ func TestUpdateScanCache_FilesNotInScanResultsAreUnaffected(t *testing.T) {
 	binding.updateScanCache(&nopLoggerForCache, toolDef, second, "/repo", false)
 
 	binding.scanCacheMu.Lock()
-	after := binding.scanCache["/repo/src/other.ts"]
+	after := cacheEntries(binding)["/repo/src/other.ts"]
 	binding.scanCacheMu.Unlock()
 
 	require.Equal(t, before, after, "entry for a file untouched by the later scan must be left unchanged")
@@ -275,7 +294,7 @@ func TestUpdateScanCache_IgnoresUnrelatedToolsAndMalformedOutput(t *testing.T) {
 		binding.updateScanCache(&nopLoggerForCache, SnykMcpToolsDefinition{Name: ToolName.Version}, `{"ok":true}`, "/repo", false)
 		binding.scanCacheMu.Lock()
 		defer binding.scanCacheMu.Unlock()
-		require.Empty(t, binding.scanCache)
+		require.Empty(t, cacheEntries(binding))
 	})
 
 	t.Run("malformed JSON does not panic and leaves cache unchanged", func(t *testing.T) {
@@ -284,7 +303,7 @@ func TestUpdateScanCache_IgnoresUnrelatedToolsAndMalformedOutput(t *testing.T) {
 		})
 		binding.scanCacheMu.Lock()
 		defer binding.scanCacheMu.Unlock()
-		require.Empty(t, binding.scanCache)
+		require.Empty(t, cacheEntries(binding))
 	})
 }
 
@@ -302,13 +321,13 @@ func TestScanCacheEviction_501stDistinctFileEvictsLeastRecentlyUpdated(t *testin
 
 	// Fill the cache to exactly the cap, one distinct file per call so each
 	// gets a distinct (increasing) updatedAt timestamp.
-	for i := 0; i < maxScanCacheEntries; i++ {
+	for i := 0; i < MaxScanCacheEntries; i++ {
 		binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile(fmt.Sprintf("file%d.ts", i)), "/repo", false)
 	}
 
 	binding.scanCacheMu.Lock()
-	require.Len(t, binding.scanCache, maxScanCacheEntries)
-	_, leastRecentStillPresent := binding.scanCache["/repo/file0.ts"]
+	require.Len(t, cacheEntries(binding), MaxScanCacheEntries)
+	_, leastRecentStillPresent := cacheEntries(binding)["/repo/file0.ts"]
 	binding.scanCacheMu.Unlock()
 	require.True(t, leastRecentStillPresent, "cache must not have evicted anything before reaching the cap")
 
@@ -319,13 +338,13 @@ func TestScanCacheEviction_501stDistinctFileEvictsLeastRecentlyUpdated(t *testin
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
 
-	require.Len(t, binding.scanCache, maxScanCacheEntries, "cache must stay capped at maxScanCacheEntries")
-	_, evicted := binding.scanCache["/repo/file0.ts"]
+	require.Len(t, cacheEntries(binding), MaxScanCacheEntries, "cache must stay capped at MaxScanCacheEntries")
+	_, evicted := cacheEntries(binding)["/repo/file0.ts"]
 	require.False(t, evicted, "the least-recently-updated entry must be evicted first")
-	_, newEntryPresent := binding.scanCache["/repo/file-overflow.ts"]
+	_, newEntryPresent := cacheEntries(binding)["/repo/file-overflow.ts"]
 	require.True(t, newEntryPresent)
 	// A file inserted partway through (neither oldest nor newest) must survive.
-	_, midEntryPresent := binding.scanCache[fmt.Sprintf("/repo/file%d.ts", maxScanCacheEntries/2)]
+	_, midEntryPresent := cacheEntries(binding)[fmt.Sprintf("/repo/file%d.ts", MaxScanCacheEntries/2)]
 	require.True(t, midEntryPresent)
 }
 
@@ -341,7 +360,7 @@ func TestScanCacheEviction_ReUpsertingExistingFileDoesNotEvict(t *testing.T) {
 		]}]}`, ruleID, ruleID, file)
 	}
 
-	for i := 0; i < maxScanCacheEntries; i++ {
+	for i := 0; i < MaxScanCacheEntries; i++ {
 		binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile(fmt.Sprintf("file%d.ts", i), "javascript/Rule"), "/repo", false)
 	}
 
@@ -352,8 +371,8 @@ func TestScanCacheEviction_ReUpsertingExistingFileDoesNotEvict(t *testing.T) {
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
 
-	require.Len(t, binding.scanCache, maxScanCacheEntries)
-	entry, ok := binding.scanCache["/repo/file0.ts"]
+	require.Len(t, cacheEntries(binding), MaxScanCacheEntries)
+	entry, ok := cacheEntries(binding)["/repo/file0.ts"]
 	require.True(t, ok)
 	_, hasNewID := entry.ids["sast:javascript/RuleV2"]
 	require.True(t, hasNewID, "the re-scanned file's record must reflect the newer findings")
@@ -377,9 +396,9 @@ func TestVerifyIDs_MalformedOrUnrecognizedPrefixIsUnverifiable(t *testing.T) {
 	binding := newCacheTestBinding()
 	// Seed some cache data so we can be sure it's the prefix, not an empty
 	// cache, driving the result.
-	binding.scanCache = map[string]*scanCacheEntry{
+	seedCache(binding, map[string]*scanCacheEntry{
 		"/repo/src/db.ts": {scanType: scanTypeSAST, ids: map[string]struct{}{"sast:javascript/SqlInjection": {}}, updatedAt: time.Now()},
-	}
+	})
 
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{""}), "empty string has no recognized prefix")
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{"iac:CKV_AWS_1"}), "unrecognized prefix")
@@ -388,10 +407,10 @@ func TestVerifyIDs_MalformedOrUnrecognizedPrefixIsUnverifiable(t *testing.T) {
 
 func TestVerifyIDs_VerifiedWhenAbsentFromEveryRelevantCachedFile(t *testing.T) {
 	binding := newCacheTestBinding()
-	binding.scanCache = map[string]*scanCacheEntry{
+	seedCache(binding, map[string]*scanCacheEntry{
 		"/repo/src/a.ts": {scanType: scanTypeSAST, ids: map[string]struct{}{"sast:javascript/XSS": {}}, updatedAt: time.Now()},
 		"/repo/src/b.ts": {scanType: scanTypeSAST, ids: map[string]struct{}{"sast:javascript/CSRF": {}}, updatedAt: time.Now()},
-	}
+	})
 
 	require.Equal(t, verificationVerified, binding.verifyIDs([]string{"sast:javascript/SqlInjection"}))
 }
@@ -399,18 +418,18 @@ func TestVerifyIDs_VerifiedWhenAbsentFromEveryRelevantCachedFile(t *testing.T) {
 func TestVerifyIDs_UnverifiableWhenNoCachedFileOfRelevantScanType(t *testing.T) {
 	binding := newCacheTestBinding()
 	// Only SCA data cached; a SAST claim has no relevant scan type to check against.
-	binding.scanCache = map[string]*scanCacheEntry{
+	seedCache(binding, map[string]*scanCacheEntry{
 		"/repo/package.json": {scanType: scanTypeSCA, ids: map[string]struct{}{"sca:SNYK-JS-LODASH-1234567": {}}, updatedAt: time.Now()},
-	}
+	})
 
 	require.Equal(t, verificationUnverifiable, binding.verifyIDs([]string{"sast:javascript/SqlInjection"}))
 }
 
 func TestVerifyIDs_MismatchWhenStillPresentInSomeCachedFile(t *testing.T) {
 	binding := newCacheTestBinding()
-	binding.scanCache = map[string]*scanCacheEntry{
+	seedCache(binding, map[string]*scanCacheEntry{
 		"/repo/src/a.ts": {scanType: scanTypeSAST, ids: map[string]struct{}{"sast:javascript/SqlInjection": {}}, updatedAt: time.Now()},
-	}
+	})
 
 	require.Equal(t, verificationMismatch, binding.verifyIDs([]string{"sast:javascript/SqlInjection"}))
 }
@@ -418,9 +437,9 @@ func TestVerifyIDs_MismatchWhenStillPresentInSomeCachedFile(t *testing.T) {
 func TestVerifyIDs_MixedOutcomesResolveByWorstCasePrecedence(t *testing.T) {
 	newBindingWithSASTCache := func() *McpLLMBinding {
 		binding := newCacheTestBinding()
-		binding.scanCache = map[string]*scanCacheEntry{
+		seedCache(binding, map[string]*scanCacheEntry{
 			"/repo/src/a.ts": {scanType: scanTypeSAST, ids: map[string]struct{}{"sast:javascript/StillThere": {}}, updatedAt: time.Now()},
-		}
+		})
 		return binding
 	}
 
@@ -451,7 +470,7 @@ func TestVerifyIDs_MixedOutcomesResolveByWorstCasePrecedence(t *testing.T) {
 func TestScanTypeFromID(t *testing.T) {
 	cases := []struct {
 		id       string
-		wantType string
+		wantType scanType
 		wantOK   bool
 	}{
 		{"sast:javascript/SqlInjection", scanTypeSAST, true},
@@ -494,7 +513,7 @@ func TestDefaultHandler_ScanCache_BroadThenNarrowerScanSameFile(t *testing.T) {
 	require.NotNil(t, result)
 
 	fixture.binding.scanCacheMu.Lock()
-	entry, ok := fixture.binding.scanCache[strings.TrimRight(tmpDir, "/")+"/db.ts"]
+	entry, ok := cacheEntries(fixture.binding)[strings.TrimRight(tmpDir, "/")+"/db.ts"]
 	fixture.binding.scanCacheMu.Unlock()
 	require.True(t, ok)
 	_, hasBroad := entry.ids["sast:javascript/SqlInjection"]
@@ -512,7 +531,7 @@ func TestDefaultHandler_ScanCache_BroadThenNarrowerScanSameFile(t *testing.T) {
 	require.NotNil(t, result)
 
 	fixture.binding.scanCacheMu.Lock()
-	entry, ok = fixture.binding.scanCache[strings.TrimRight(tmpDir, "/")+"/db.ts"]
+	entry, ok = cacheEntries(fixture.binding)[strings.TrimRight(tmpDir, "/")+"/db.ts"]
 	fixture.binding.scanCacheMu.Unlock()
 	require.True(t, ok)
 	_, hasOld := entry.ids["sast:javascript/SqlInjection"]

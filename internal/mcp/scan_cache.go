@@ -17,6 +17,7 @@
 package mcp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,166 +29,12 @@ import (
 	"github.com/snyk/studio-mcp/internal/types"
 )
 
-// maxScanCacheEntries caps the scan-result cache at the 500 most-recently
-// updated files.
-// When a new distinct file path would exceed the cap, the least-recently
-// updated entry is evicted first.
-// This is a defensive bound, not a tuned production limit.
-const maxScanCacheEntries = 500
+type scanType string
 
 const (
-	scanTypeSAST = "sast"
-	scanTypeSCA  = "sca"
+	scanTypeSAST scanType = "sast"
+	scanTypeSCA  scanType = "sca"
 )
-
-// scanCacheEntry is the freshest known finding set for one file path, as
-// reported by the most recent snyk_code_scan/snyk_sca_scan call whose results
-// included that file. ids are already scan-type-prefixed (e.g. "sast:rule",
-// "sca:SNYK-JS-...") so they can be compared directly against
-// fixedIssueIds/preventedIssueIds entries.
-type scanCacheEntry struct {
-	scanType  string
-	ids       map[string]struct{}
-	updatedAt time.Time
-}
-
-// updateScanCache upserts one cache entry per file path found in a successful
-// scan's own results (SARIF artifactLocation.uri for SAST, the scan's
-// reported manifest path (DisplayTargetFile/Path) for SCA), not by the tool
-// call's own path argument.
-// Both scan types are keyed symmetrically by file path.
-// Files the scan didn't report on are left untouched; only files present in
-// this scan's results are upserted, and each upsert fully replaces that
-// file's previous record with this scan's findings.
-//
-// The tool call's own workDir argument additionally seeds cache upserts for
-// files/directories that a fresh, clean scan covers but reported no issues
-// for.
-// Without this, a scan that becomes clean could never supersede an earlier
-// scan's stale, still-vulnerable record for the same scope, since a scan
-// with fewer (or zero) issues produces fewer (or no) idsByFile entries on
-// its own.
-// When workDir is a single file, that scan is authoritative for that exact
-// file.
-// When workDir is a directory, that scan is authoritative for every file
-// already cached (of the same scan type) within that directory tree, on the
-// assumption (true for this tool's default all_projects/recursive scanning)
-// that a directory scan comprehensively covers its own scope.
-// Without this, a genuinely successful fix could be tagged
-// verification=mismatch because the cache never learned its file, then its
-// containing directory, had become clean.
-func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, includeIgnores bool) {
-	var scanType string
-	var issues []types.IssueData
-	var err error
-
-	switch toolDef.Name {
-	case ToolName.CodeTest:
-		scanType = scanTypeSAST
-		issues, err = code.ConvertSARIFJSONToIssues(logger, []byte(output), workDir, includeIgnores)
-	case ToolName.ScaTest:
-		scanType = scanTypeSCA
-		issues, err = oss.ConvertOssJsonToIssues(workDir, []byte(output), includeIgnores)
-	default:
-		return
-	}
-	if err != nil {
-		if logger != nil {
-			logger.Debug().Err(err).Str("toolName", toolDef.Name).Msg("Failed to parse scan output for scan-result cache; leaving cache unchanged")
-		}
-		return
-	}
-
-	prefix := scanType + ":"
-	idsByFile := make(map[string]map[string]struct{})
-	for _, issue := range issues {
-		if issue.FilePath == "" || issue.ID == "" {
-			continue
-		}
-		set, ok := idsByFile[issue.FilePath]
-		if !ok {
-			set = make(map[string]struct{})
-			idsByFile[issue.FilePath] = set
-		}
-		set[prefix+issue.ID] = struct{}{}
-	}
-
-	m.scanCacheMu.Lock()
-	defer m.scanCacheMu.Unlock()
-
-	if m.scanCache == nil {
-		m.scanCache = make(map[string]*scanCacheEntry)
-	}
-
-	if info, statErr := os.Stat(workDir); statErr == nil {
-		if info.IsDir() {
-			for filePath, entry := range m.scanCache {
-				if entry.scanType != scanType {
-					continue
-				}
-				if _, alreadyCovered := idsByFile[filePath]; alreadyCovered {
-					continue
-				}
-				if isWithinDir(filePath, workDir) {
-					idsByFile[filePath] = make(map[string]struct{})
-				}
-			}
-		} else if _, alreadyPresent := idsByFile[workDir]; !alreadyPresent {
-			idsByFile[workDir] = make(map[string]struct{})
-		}
-	}
-
-	if len(idsByFile) == 0 {
-		return
-	}
-
-	now := time.Now()
-	for filePath, ids := range idsByFile {
-		if _, exists := m.scanCache[filePath]; !exists && len(m.scanCache) >= maxScanCacheEntries {
-			m.evictLeastRecentlyUpdatedLocked()
-		}
-		m.scanCache[filePath] = &scanCacheEntry{
-			scanType:  scanType,
-			ids:       ids,
-			updatedAt: now,
-		}
-	}
-}
-
-// isWithinDir reports whether filePath is dir itself or nested inside it,
-// comparing cleaned paths so callers don't need to worry about trailing
-// separators or relative segments.
-func isWithinDir(filePath, dir string) bool {
-	cleanDir := filepath.Clean(dir)
-	cleanFile := filepath.Clean(filePath)
-	if cleanFile == cleanDir {
-		return true
-	}
-	rel, err := filepath.Rel(cleanDir, cleanFile)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// evictLeastRecentlyUpdatedLocked removes the entry with the oldest updatedAt
-// timestamp.
-// Callers must hold scanCacheMu.
-func (m *McpLLMBinding) evictLeastRecentlyUpdatedLocked() {
-	var oldestKey string
-	var oldestTime time.Time
-	first := true
-	for key, entry := range m.scanCache {
-		if first || entry.updatedAt.Before(oldestTime) {
-			oldestKey = key
-			oldestTime = entry.updatedAt
-			first = false
-		}
-	}
-	if oldestKey != "" {
-		delete(m.scanCache, oldestKey)
-	}
-}
 
 // verificationState is the per-call tag attached to a snyk_send_feedback
 // analytics event, summarizing how well fixedIssueIds/preventedIssueIds claims
@@ -208,35 +55,39 @@ var verificationPrecedence = map[verificationState]int{
 	verificationMismatch:     3,
 }
 
-// verifyIDs resolves a single event-level verification state for a combined
-// list of fixedIssueIds/preventedIssueIds by determining each ID's individual
-// state and reducing by worst-case precedence.
-// Returns "" when ids is empty, signaling callers should omit the
-// verification tag entirely since there is nothing to verify.
-func (m *McpLLMBinding) verifyIDs(ids []string) verificationState {
-	if len(ids) == 0 {
-		return ""
-	}
-
-	m.scanCacheMu.Lock()
-	defer m.scanCacheMu.Unlock()
-
-	worst := verificationVerified
-	for _, id := range ids {
-		state := m.verifyIDLocked(id)
-		if verificationPrecedence[state] > verificationPrecedence[worst] {
-			worst = state
-		}
-	}
-	return worst
+// scanCacheEntry is the freshest known finding set for one file path, as
+// reported by the most recent snyk_code_scan/snyk_sca_scan call whose results
+// included that file. ids are already scan-type-prefixed (e.g. "sast:rule",
+// "sca:SNYK-JS-...") so they can be compared directly against
+// fixedIssueIds/preventedIssueIds entries.
+type scanCacheEntry struct {
+	scanType  scanType
+	ids       map[string]struct{}
+	updatedAt time.Time
 }
 
-// verifyIDLocked determines the verification state of a single claimed ID by
-// scanning the freshest cached record of every cached file of the relevant
-// scan type (IDs carry no file information, so there is no single "its file"
-// record to check).
-// Callers must hold scanCacheMu.
-func (m *McpLLMBinding) verifyIDLocked(id string) verificationState {
+type scanCache struct {
+	entries map[string]*scanCacheEntry
+
+	// caps the scan-result cache at the maxEntries most-recently updated files.
+	// When a new distinct file path would exceed the cap, the least-recently
+	// updated entry is evicted first.
+	maxEntries int
+}
+
+func (s *scanCache) UpdateSASTIssues(workDir string, issues []types.IssueData) {
+	now := time.Now()
+	s.clearEntries(now, scanTypeSAST, workDir, issues)
+	s.addEntries(now, scanTypeSAST, issues)
+}
+
+func (s *scanCache) UpdateSCAIssues(manifestFile string, issues []types.IssueData) {
+	now := time.Now()
+	s.clearEntries(now, scanTypeSCA, manifestFile, issues)
+	s.addEntries(now, scanTypeSCA, issues)
+}
+
+func (m *scanCache) VerifyID(id string) verificationState {
 	scanType, ok := scanTypeFromID(id)
 	if !ok {
 		// No recognized scan-type prefix (including an empty string or a
@@ -245,7 +96,7 @@ func (m *McpLLMBinding) verifyIDLocked(id string) verificationState {
 	}
 
 	foundRelevantScan := false
-	for _, entry := range m.scanCache {
+	for _, entry := range m.entries {
 		if entry.scanType != scanType {
 			continue
 		}
@@ -257,12 +108,115 @@ func (m *McpLLMBinding) verifyIDLocked(id string) verificationState {
 	if !foundRelevantScan {
 		return verificationUnverifiable
 	}
+
 	return verificationVerified
+}
+
+func (s *scanCache) clearEntries(now time.Time, scanType scanType, path string, issues []types.IssueData) {
+	if info, err := os.Stat(path); err == nil {
+		if info.IsDir() {
+			for filePath, entry := range s.entries {
+				if entry.scanType != scanType {
+					continue
+				}
+
+				if isWithinDir(filePath, path) {
+					entry.ids = make(map[string]struct{})
+					entry.updatedAt = now
+				}
+			}
+		} else {
+			if entry, ok := s.entries[path]; ok {
+				entry.ids = make(map[string]struct{})
+				entry.updatedAt = now
+			} else {
+				s.entries[path] = &scanCacheEntry{
+					scanType:  scanType,
+					ids:       map[string]struct{}{},
+					updatedAt: now,
+				}
+			}
+		}
+	}
+}
+
+func (s *scanCache) addEntries(now time.Time, scanType scanType, issues []types.IssueData) {
+	// Group issue IDs by file path
+	prefix := string(scanType + ":")
+	idsByFile := make(map[string]map[string]struct{})
+	for _, issue := range issues {
+		if issue.FilePath == "" || issue.ID == "" {
+			continue
+		}
+		set, ok := idsByFile[issue.FilePath]
+		if !ok {
+			set = make(map[string]struct{})
+			idsByFile[issue.FilePath] = set
+		}
+		set[prefix+issue.ID] = struct{}{}
+	}
+
+	// Insert grouped ids (it's ok to over-insert, we will evict excess entries before we return)
+	for filePath, ids := range idsByFile {
+		s.entries[filePath] = &scanCacheEntry{
+			scanType:  scanType,
+			ids:       ids,
+			updatedAt: now,
+		}
+	}
+
+	// Evict excess issues
+	// TODO: this is an N^2 solution.
+	// We need a different data structure to bring the runtime down
+	for len(s.entries) > s.maxEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		first := true
+		for key, entry := range s.entries {
+			if first || entry.updatedAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.updatedAt
+				first = false
+			}
+		}
+		if oldestKey != "" {
+			delete(s.entries, oldestKey)
+		}
+	}
+}
+
+func parseScanOutput(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, includeIgnores bool) (scanType, []types.IssueData, error) {
+	switch toolDef.Name {
+	case ToolName.CodeTest:
+		issues, err := code.ConvertSARIFJSONToIssues(logger, []byte(output), workDir, includeIgnores)
+		return scanTypeSAST, issues, err
+	case ToolName.ScaTest:
+		issues, err := oss.ConvertOssJsonToIssues(workDir, []byte(output), includeIgnores)
+		return scanTypeSCA, issues, err
+	default:
+		return "", nil, fmt.Errorf("unsupported tool name %q", toolDef.Name)
+	}
+}
+
+// isWithinDir reports whether filePath is dir itself or nested inside it,
+// comparing cleaned paths so callers don't need to worry about trailing
+// separators or relative segments.
+func isWithinDir(filePath, dir string) bool {
+	cleanDir := filepath.Clean(dir)
+	cleanFile := filepath.Clean(filePath)
+	if cleanFile == cleanDir {
+		return true
+	}
+	rel, err := filepath.Rel(cleanDir, cleanFile)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // scanTypeFromID extracts the scan type from a scan-type-prefixed issue ID
 // ("sast:"/"sca:"). ok is false for an empty string or an unrecognized prefix.
-func scanTypeFromID(id string) (scanType string, ok bool) {
+func scanTypeFromID(id string) (scanType scanType, ok bool) {
 	switch {
 	case strings.HasPrefix(id, "sast:"):
 		return scanTypeSAST, true
