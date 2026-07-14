@@ -44,6 +44,8 @@ import (
 	"github.com/snyk/go-application-framework/pkg/workflow"
 )
 
+const MaxScanCacheEntries = 500
+
 const (
 	TransportParam     string = "transport"
 	SseTransportType   string = "sse"
@@ -70,19 +72,18 @@ type McpLLMBinding struct {
 	// thereafter only read, so it needs no dedicated lock.
 	correlationID string
 
-	// scanCacheMu guards scanCache.
+	// scanCacheMu guards scanCacheLocked.
 	// It is intentionally separate from mutex above, which only guards
 	// Start/Started lifecycle state.
-	scanCacheMu sync.Mutex
-	// scanCache is an in-process cache of the freshest scan findings observed
-	// per file path, populated by defaultHandler after successful
-	// snyk_code_scan/snyk_sca_scan calls and consulted by snykSendFeedback to
-	// verify fixedIssueIds/preventedIssueIds claims.
-	// Keyed by file path extracted from each scan's own results, not the tool
-	// call's own path argument.
-	// Bounded to maxScanCacheEntries, evicting the least-recently-updated
-	// entry first.
-	scanCache map[string]*scanCacheEntry
+	// Do not directly use scanCacheLocked
+	// call
+	//
+	// cache, release := self.aquireScanCache()
+	// defer release
+	//
+	// to ensure the cache is not nil and is protected by the mutex
+	scanCacheMu     sync.Mutex
+	scanCacheLocked *scanCache
 }
 
 func NewMcpLLMBinding(opts ...Option) *McpLLMBinding {
@@ -337,4 +338,65 @@ func (m *McpLLMBinding) addAuthEnvVars(invocationCtx workflow.InvocationContext,
 	}
 
 	return expandedEnv
+}
+
+func (m *McpLLMBinding) acquireScanCache() (*scanCache, func()) {
+	m.scanCacheMu.Lock()
+
+	if m.scanCacheLocked == nil {
+		m.scanCacheLocked = &scanCache{
+			entries:    make(map[string]*scanCacheEntry),
+			maxEntries: MaxScanCacheEntries,
+		}
+	}
+
+	return m.scanCacheLocked, m.scanCacheMu.Unlock
+}
+
+func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, includeIgnores bool) {
+	scanType, issues, err := parseScanOutput(logger, toolDef, output, workDir, includeIgnores)
+
+	if err != nil {
+		if logger != nil {
+			logger.Debug().Err(err).Str("toolName", toolDef.Name).Msg("Failed to parse scan output for scan-result cache; leaving cache unchanged")
+		}
+		return
+	}
+
+	cache, release := m.acquireScanCache()
+	defer release()
+
+	switch scanType {
+	case scanTypeSAST:
+		cache.UpdateSASTIssues(workDir, issues)
+
+	case scanTypeSCA:
+		cache.UpdateSCAIssues(workDir, issues)
+
+	default:
+		logger.Debug().Err(fmt.Errorf("unknown scan type %q", scanType)).Any("scanType", scanType).Msg("Could not update scan cache with unknown scan type")
+	}
+}
+
+// verifyIDs resolves a single event-level verification state for a combined
+// list of fixedIssueIds/preventedIssueIds by determining each ID's individual
+// state and reducing by worst-case precedence.
+// Returns "" when ids is empty, signaling callers should omit the
+// verification tag entirely since there is nothing to verify.
+func (m *McpLLMBinding) verifyIDs(ids []string) verificationState {
+	if len(ids) == 0 {
+		return ""
+	}
+
+	cache, release := m.acquireScanCache()
+	defer release()
+
+	worst := verificationVerified
+	for _, id := range ids {
+		state := cache.VerifyID(id)
+		if verificationPrecedence[state] > verificationPrecedence[worst] {
+			worst = state
+		}
+	}
+	return worst
 }
