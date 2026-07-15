@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -69,12 +70,22 @@ type scanCacheEntry struct {
 type scanCache struct {
 	entries map[string]*scanCacheEntry
 
-	// caps the scan-result cache at the maxEntries most-recently updated files.
-	// When a new distinct file path would exceed the cap, the least-recently
-	// updated entry is evicted first.
+	// maxEntries bounds the cache; see MaxScanCacheEntries.
 	maxEntries int
 }
 
+// UpdateSASTIssues and UpdateSCAIssues upsert one entry per file path found
+// in the scan's own results (not the tool call's path argument), fully
+// replacing each file's prior record.
+//
+// workDir additionally clears stale entries for any file/directory it
+// covers that reported no issues, so a clean re-scan can supersede an old
+// vulnerable record even though it produces no findings of its own to do
+// so. A single-file workDir clears just that file; a directory workDir
+// clears every already-cached file (of the same scan type) nested under it,
+// matching this tool's recursive scan behavior. Without this, a genuine fix
+// could be misreported as verification=mismatch because the cache never
+// learned its file (or containing directory) had gone clean.
 func (s *scanCache) UpdateSASTIssues(workDir string, issues []types.IssueData) {
 	now := time.Now()
 	s.clearEntries(now, scanTypeSAST, workDir, issues)
@@ -87,7 +98,7 @@ func (s *scanCache) UpdateSCAIssues(manifestFile string, issues []types.IssueDat
 	s.addEntries(now, scanTypeSCA, issues)
 }
 
-func (m *scanCache) VerifyID(id string) verificationState {
+func (s *scanCache) VerifyID(id string) verificationState {
 	scanType, ok := scanTypeFromID(id)
 	if !ok {
 		// No recognized scan-type prefix (including an empty string or a
@@ -96,7 +107,7 @@ func (m *scanCache) VerifyID(id string) verificationState {
 	}
 
 	foundRelevantScan := false
-	for _, entry := range m.entries {
+	for _, entry := range s.entries {
 		if entry.scanType != scanType {
 			continue
 		}
@@ -112,6 +123,11 @@ func (m *scanCache) VerifyID(id string) verificationState {
 	return verificationVerified
 }
 
+// clearEntries implements the workDir-seeding half of UpdateSASTIssues /
+// UpdateSCAIssues described above: it clears stale ids for path itself (or,
+// when path is a directory, for every already-cached file of scanType nested
+// under it) so that a clean re-scan can supersede a stale vulnerable record
+// even when it reports no issues of its own.
 func (s *scanCache) clearEntries(now time.Time, scanType scanType, path string, issues []types.IssueData) {
 	if info, err := os.Stat(path); err == nil {
 		if info.IsDir() {
@@ -127,8 +143,13 @@ func (s *scanCache) clearEntries(now time.Time, scanType scanType, path string, 
 			}
 		} else {
 			if entry, ok := s.entries[path]; ok {
-				entry.ids = make(map[string]struct{})
-				entry.updatedAt = now
+				// Only clear an existing entry when it's the same scan type;
+				// otherwise leave the other scan type's record untouched,
+				// matching the directory branch's skip logic above.
+				if entry.scanType == scanType {
+					entry.ids = make(map[string]struct{})
+					entry.updatedAt = now
+				}
 			} else {
 				s.entries[path] = &scanCacheEntry{
 					scanType:  scanType,
@@ -165,23 +186,27 @@ func (s *scanCache) addEntries(now time.Time, scanType scanType, issues []types.
 		}
 	}
 
-	// Evict excess issues
-	// TODO: this is an N^2 solution.
-	// We need a different data structure to bring the runtime down
-	for len(s.entries) > s.maxEntries {
-		var oldestKey string
-		var oldestTime time.Time
-		first := true
-		for key, entry := range s.entries {
-			if first || entry.updatedAt.Before(oldestTime) {
-				oldestKey = key
-				oldestTime = entry.updatedAt
-				first = false
-			}
-		}
-		if oldestKey != "" {
-			delete(s.entries, oldestKey)
-		}
+	s.evictExcess()
+}
+
+// evictExcess removes the least-recently-updated entries, oldest first,
+// until the cache is back within maxEntries.
+func (s *scanCache) evictExcess() {
+	excess := len(s.entries) - s.maxEntries
+	if excess <= 0 {
+		return
+	}
+
+	keys := make([]string, 0, len(s.entries))
+	for key := range s.entries {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return s.entries[keys[i]].updatedAt.Before(s.entries[keys[j]].updatedAt)
+	})
+
+	for _, key := range keys[:excess] {
+		delete(s.entries, key)
 	}
 }
 

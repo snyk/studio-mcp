@@ -44,6 +44,11 @@ import (
 	"github.com/snyk/go-application-framework/pkg/workflow"
 )
 
+// MaxScanCacheEntries caps the scan-result cache at the 500 most-recently
+// updated files.
+// When a new distinct file path would exceed the cap, the least-recently
+// updated entry is evicted first.
+// This is a defensive bound, not a tuned production limit.
 const MaxScanCacheEntries = 500
 
 const (
@@ -75,13 +80,18 @@ type McpLLMBinding struct {
 	// scanCacheMu guards scanCacheLocked.
 	// It is intentionally separate from mutex above, which only guards
 	// Start/Started lifecycle state.
-	// Do not directly use scanCacheLocked
-	// call
 	//
-	// cache, release := self.aquireScanCache()
-	// defer release
+	// scanCacheLocked is an in-process cache of the freshest scan findings
+	// observed per file path, populated by defaultHandler after successful
+	// snyk_code_scan/snyk_sca_scan calls and consulted by snykSendFeedback to
+	// verify fixedIssueIds/preventedIssueIds claims.
 	//
-	// to ensure the cache is not nil and is protected by the mutex
+	// Do not read or write scanCacheLocked directly; it is lazily
+	// initialized and mutex-guarded, so all access must go through
+	// acquireScanCache:
+	//
+	//	cache, release := m.acquireScanCache()
+	//	defer release()
 	scanCacheMu     sync.Mutex
 	scanCacheLocked *scanCache
 }
@@ -374,7 +384,9 @@ func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpT
 		cache.UpdateSCAIssues(workDir, issues)
 
 	default:
-		logger.Debug().Err(fmt.Errorf("unknown scan type %q", scanType)).Any("scanType", scanType).Msg("Could not update scan cache with unknown scan type")
+		if logger != nil {
+			logger.Debug().Err(fmt.Errorf("unknown scan type %q", scanType)).Any("scanType", scanType).Msg("Could not update scan cache with unknown scan type")
+		}
 	}
 }
 

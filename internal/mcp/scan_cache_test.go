@@ -183,6 +183,43 @@ func TestUpdateScanCache_CleanSingleFileRescanClearsStaleVulnerableRecord(t *tes
 	require.Empty(t, entry.ids, "a clean single-file re-scan must clear the stale vulnerable record")
 }
 
+func TestUpdateScanCache_CleanSingleFileRescanDoesNotClearOtherScanTypesRecord(t *testing.T) {
+	// Regression test: the single-file counterpart to
+	// TestUpdateScanCache_DirectoryRescanDoesNotClearFilesOutsideItsScope.
+	// entries is keyed only by file path, so a SAST and an SCA record for the
+	// same path can't coexist as two entries - but a clean single-file re-scan
+	// of one type must still leave a differently-typed existing record for
+	// that same path untouched instead of silently clearing its ids (and
+	// leaving scanType stale) just because the path already had an entry.
+	binding := newCacheTestBinding()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "manifest.mod")
+	require.NoError(t, os.WriteFile(filePath, []byte("module example\n"), 0o600))
+
+	binding.scanCacheMu.Lock()
+	seedCache(binding, map[string]*scanCacheEntry{
+		filePath: {
+			scanType:  scanTypeSCA,
+			ids:       map[string]struct{}{"sca:SNYK-OTHER-VULN": {}},
+			updatedAt: time.Now(),
+		},
+	})
+	binding.scanCacheMu.Unlock()
+
+	toolDef := SnykMcpToolsDefinition{Name: ToolName.CodeTest}
+	cleanSarif := `{"runs":[{"tool":{"driver":{"rules":[]}},"results":[]}]}`
+	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanSarif, filePath, false)
+
+	binding.scanCacheMu.Lock()
+	entry, ok := cacheEntries(binding)[filePath]
+	binding.scanCacheMu.Unlock()
+	require.True(t, ok, "the file's pre-existing cache entry must still exist")
+	require.Equal(t, scanTypeSCA, entry.scanType, "a same-path scan of a different type must not relabel the existing entry's scan type")
+	_, stillHasVuln := entry.ids["sca:SNYK-OTHER-VULN"]
+	require.True(t, stillHasVuln, "a clean single-file re-scan must not clear an existing record of a different scan type for the same path")
+}
+
 func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *testing.T) {
 	// Regression test for the directory-scoped counterpart to the single-file
 	// bug above: an SCA validation re-scan targeted at the whole project
