@@ -363,7 +363,18 @@ func (m *McpLLMBinding) acquireScanCache() (*scanCache, func()) {
 	return m.scanCacheLocked, m.scanCacheMu.Unlock
 }
 
-func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, includeIgnores bool) {
+// updateScanCache upserts the scan-result cache from a successful scan's
+// output.
+//
+// workDir and scanPath serve different purposes and must not be conflated:
+// workDir is the CLI's own working directory (always a directory, used as
+// the basePath for resolving the scan output's relative file paths), while
+// scanPath is the tool call's own "path" argument exactly as given (a file
+// or a directory) and defines the scope the cache treats as authoritative -
+// see UpdateSASTIssues/UpdateSCAIssues. Passing workDir for scanPath would
+// silently widen a single-file scan's authority to that file's entire
+// parent directory.
+func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpToolsDefinition, output string, workDir string, scanPath string, includeIgnores bool) {
 	scanType, issues, err := parseScanOutput(logger, toolDef, output, workDir, includeIgnores)
 
 	if err != nil {
@@ -378,10 +389,10 @@ func (m *McpLLMBinding) updateScanCache(logger *zerolog.Logger, toolDef SnykMcpT
 
 	switch scanType {
 	case scanTypeSAST:
-		cache.UpdateSASTIssues(workDir, issues)
+		cache.UpdateSASTIssues(scanPath, issues)
 
 	case scanTypeSCA:
-		cache.UpdateSCAIssues(workDir, issues)
+		cache.UpdateSCAIssues(scanPath, issues)
 
 	default:
 		if logger != nil {

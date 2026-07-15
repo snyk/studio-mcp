@@ -247,6 +247,23 @@ func (m *McpLLMBinding) runSnyk(ctx context.Context, invocationCtx workflow.Invo
 	return resAsString, nil
 }
 
+// scanPathArgument returns the tool call's own "path" argument exactly as
+// the caller passed it (a file or a directory), for use as the scan-result
+// cache's authority scope. This is deliberately distinct from workingDir:
+// workingDir is always a directory (it's filepath.Dir(path) when path is a
+// file, since that's what the CLI subprocess needs as its cwd), so passing
+// workingDir here would silently widen a single-file scan's cache authority
+// to that file's entire parent directory. Falls back to workingDir for
+// tools with no "path" param.
+func scanPathArgument(params map[string]convertedToolParameter, workingDir string) string {
+	if pathParam, ok := params["path"]; ok {
+		if pathStr, ok := pathParam.value.(string); ok && pathStr != "" {
+			return pathStr
+		}
+	}
+	return workingDir
+}
+
 // nolint: gocyclo, nolintlint // func is used for all scanners, will be refactored to use GAF WFs
 // defaultHandler executes a command and enhances output for scan tools
 func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext, toolDef SnykMcpToolsDefinition) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -320,7 +337,7 @@ func (m *McpLLMBinding) defaultHandler(invocationCtx workflow.InvocationContext,
 		// Success path: upsert the scan-result cache (design.md D2) before enhancing
 		// output, since enhancement re-shapes `output` into the LLM-facing format.
 		if success && (toolDef.Name == ToolName.CodeTest || toolDef.Name == ToolName.ScaTest) {
-			m.updateScanCache(&logger, toolDef, output, workingDir, includeIgnores)
+			m.updateScanCache(&logger, toolDef, output, workingDir, scanPathArgument(params, workingDir), includeIgnores)
 		}
 
 		// Success path: enhance output and handle file output

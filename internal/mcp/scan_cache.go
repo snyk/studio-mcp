@@ -78,23 +78,27 @@ type scanCache struct {
 // in the scan's own results (not the tool call's path argument), fully
 // replacing each file's prior record.
 //
-// workDir additionally clears stale entries for any file/directory it
+// scanPath additionally clears stale entries for any file/directory it
 // covers that reported no issues, so a clean re-scan can supersede an old
 // vulnerable record even though it produces no findings of its own to do
-// so. A single-file workDir clears just that file; a directory workDir
-// clears every already-cached file (of the same scan type) nested under it,
-// matching this tool's recursive scan behavior. Without this, a genuine fix
-// could be misreported as verification=mismatch because the cache never
-// learned its file (or containing directory) had gone clean.
-func (s *scanCache) UpdateSASTIssues(workDir string, issues []types.IssueData) {
+// so. scanPath must be the tool call's own path argument exactly as given
+// (a file or a directory) - not a derived working directory, which for a
+// single-file call is that file's parent and would wrongly widen this
+// scan's authority to every cached sibling file. A single-file scanPath
+// clears just that file; a directory scanPath clears every already-cached
+// file (of the same scan type) nested under it, matching this tool's
+// recursive scan behavior. Without this, a genuine fix could be
+// misreported as verification=mismatch because the cache never learned its
+// file (or containing directory) had gone clean.
+func (s *scanCache) UpdateSASTIssues(scanPath string, issues []types.IssueData) {
 	now := time.Now()
-	s.clearEntries(now, scanTypeSAST, workDir, issues)
+	s.clearEntries(now, scanTypeSAST, scanPath, issues)
 	s.addEntries(now, scanTypeSAST, issues)
 }
 
-func (s *scanCache) UpdateSCAIssues(manifestFile string, issues []types.IssueData) {
+func (s *scanCache) UpdateSCAIssues(scanPath string, issues []types.IssueData) {
 	now := time.Now()
-	s.clearEntries(now, scanTypeSCA, manifestFile, issues)
+	s.clearEntries(now, scanTypeSCA, scanPath, issues)
 	s.addEntries(now, scanTypeSCA, issues)
 }
 
@@ -123,7 +127,7 @@ func (s *scanCache) VerifyID(id string) verificationState {
 	return verificationVerified
 }
 
-// clearEntries implements the workDir-seeding half of UpdateSASTIssues /
+// clearEntries implements the scanPath-seeding half of UpdateSASTIssues /
 // UpdateSCAIssues described above: it clears stale ids for path itself (or,
 // when path is a directory, for every already-cached file of scanType nested
 // under it) so that a clean re-scan can supersede a stale vulnerable record

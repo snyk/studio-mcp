@@ -71,7 +71,7 @@ func TestUpdateScanCache_SASTKeyedByResultFilePath(t *testing.T) {
 		{"ruleId":"javascript/XSS","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/view.ts"},"region":{"startLine":2,"startColumn":1}}}]}
 	]}]}`
 
-	binding.updateScanCache(&nopLoggerForCache, toolDef, sarif, "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, sarif, "/repo", "/repo", false)
 
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
@@ -101,7 +101,7 @@ func TestUpdateScanCache_SCAKeyedByManifestPath(t *testing.T) {
 		{"id":"SNYK-JS-LODASH-1234567","title":"Prototype Pollution","severity":"high","packageName":"lodash","version":"4.17.15","from":["my-app@1.0.0","lodash@4.17.15"],"packageManager":"npm"}
 	]}`
 
-	binding.updateScanCache(&nopLoggerForCache, toolDef, scaOutput, "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, scaOutput, "/repo", "/repo", false)
 
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
@@ -127,14 +127,14 @@ func TestUpdateScanCache_LaterNarrowerScanOverwritesSameFile(t *testing.T) {
 	]}},"results":[
 		{"ruleId":"javascript/SqlInjection","level":"error","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/db.ts"},"region":{"startLine":1,"startColumn":1}}}]}
 	]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, broadSarif, "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, broadSarif, "/repo", "/repo", false)
 
 	narrowerSarif := `{"runs":[{"tool":{"driver":{"rules":[
 		{"id":"javascript/XSS","shortDescription":{"text":"XSS"},"properties":{"categories":["Security"]}}
 	]}},"results":[
 		{"ruleId":"javascript/XSS","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"db.ts"},"region":{"startLine":5,"startColumn":1}}}]}
 	]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, narrowerSarif, "/repo/src", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, narrowerSarif, "/repo/src", "/repo/src", false)
 
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
@@ -166,15 +166,20 @@ func TestUpdateScanCache_CleanSingleFileRescanClearsStaleVulnerableRecord(t *tes
 	]}},"results":[
 		{"ruleId":"go/CommandInjection","level":"error","locations":[{"physicalLocation":{"artifactLocation":{"uri":"vuln.go"},"region":{"startLine":1,"startColumn":1}}}]}
 	]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, vulnerableSarif, dir, false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, vulnerableSarif, dir, dir, false)
 
 	binding.scanCacheMu.Lock()
 	_, hasVuln := cacheEntries(binding)[filePath]
 	binding.scanCacheMu.Unlock()
 	require.True(t, hasVuln, "sanity check: the vulnerable finding must be cached before the clean re-scan")
 
+	// workDir (the CLI's cwd) stays dir - that's what a single-file scan
+	// actually gets, since the caller resolves it to the file's parent
+	// directory - while scanPath is the file itself, exactly as the tool
+	// call's own path argument named it. Passing dir for scanPath too would
+	// wrongly widen this scan's authority to every file in dir.
 	cleanSarif := `{"runs":[{"tool":{"driver":{"rules":[]}},"results":[]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanSarif, filePath, false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanSarif, dir, filePath, false)
 
 	binding.scanCacheMu.Lock()
 	entry, ok := cacheEntries(binding)[filePath]
@@ -209,7 +214,7 @@ func TestUpdateScanCache_CleanSingleFileRescanDoesNotClearOtherScanTypesRecord(t
 
 	toolDef := SnykMcpToolsDefinition{Name: ToolName.CodeTest}
 	cleanSarif := `{"runs":[{"tool":{"driver":{"rules":[]}},"results":[]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanSarif, filePath, false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanSarif, dir, filePath, false)
 
 	binding.scanCacheMu.Lock()
 	entry, ok := cacheEntries(binding)[filePath]
@@ -243,7 +248,7 @@ func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *test
 		"vulnerabilities": [{"id":"SNYK-GOLANG-STDNETHTTP-16535158","packageName":"std/net/http","version":"1.26.0"}],
 		"displayTargetFile": "go.sum"
 	}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, vulnerableOssJSON, dir, false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, vulnerableOssJSON, dir, dir, false)
 
 	binding.scanCacheMu.Lock()
 	_, hasVuln := cacheEntries(binding)[manifestPath]
@@ -251,7 +256,7 @@ func TestUpdateScanCache_CleanDirectoryRescanClearsStaleVulnerableRecord(t *test
 	require.True(t, hasVuln, "sanity check: the vulnerable finding must be cached before the clean re-scan")
 
 	cleanOssJSON := `{"vulnerabilities": [], "displayTargetFile": "go.sum"}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanOssJSON, dir, false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanOssJSON, dir, dir, false)
 
 	binding.scanCacheMu.Lock()
 	entry, ok := cacheEntries(binding)[manifestPath]
@@ -282,7 +287,7 @@ func TestUpdateScanCache_DirectoryRescanDoesNotClearFilesOutsideItsScope(t *test
 	binding.scanCacheMu.Unlock()
 
 	cleanOssJSON := `{"vulnerabilities": [], "displayTargetFile": "go.mod"}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanOssJSON, scannedDir, false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, cleanOssJSON, scannedDir, scannedDir, false)
 
 	binding.scanCacheMu.Lock()
 	entry, ok := cacheEntries(binding)[otherManifest]
@@ -302,7 +307,7 @@ func TestUpdateScanCache_FilesNotInScanResultsAreUnaffected(t *testing.T) {
 	]}},"results":[
 		{"ruleId":"javascript/SqlInjection","level":"error","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/other.ts"},"region":{"startLine":1,"startColumn":1}}}]}
 	]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, first, "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, first, "/repo", "/repo", false)
 
 	binding.scanCacheMu.Lock()
 	before := cacheEntries(binding)["/repo/src/other.ts"]
@@ -315,7 +320,7 @@ func TestUpdateScanCache_FilesNotInScanResultsAreUnaffected(t *testing.T) {
 	]}},"results":[
 		{"ruleId":"javascript/XSS","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/unrelated.ts"},"region":{"startLine":1,"startColumn":1}}}]}
 	]}]}`
-	binding.updateScanCache(&nopLoggerForCache, toolDef, second, "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, second, "/repo", "/repo", false)
 
 	binding.scanCacheMu.Lock()
 	after := cacheEntries(binding)["/repo/src/other.ts"]
@@ -328,7 +333,7 @@ func TestUpdateScanCache_IgnoresUnrelatedToolsAndMalformedOutput(t *testing.T) {
 	binding := newCacheTestBinding()
 
 	t.Run("non-scan tool is a no-op", func(t *testing.T) {
-		binding.updateScanCache(&nopLoggerForCache, SnykMcpToolsDefinition{Name: ToolName.Version}, `{"ok":true}`, "/repo", false)
+		binding.updateScanCache(&nopLoggerForCache, SnykMcpToolsDefinition{Name: ToolName.Version}, `{"ok":true}`, "/repo", "/repo", false)
 		binding.scanCacheMu.Lock()
 		defer binding.scanCacheMu.Unlock()
 		require.Empty(t, cacheEntries(binding))
@@ -336,7 +341,7 @@ func TestUpdateScanCache_IgnoresUnrelatedToolsAndMalformedOutput(t *testing.T) {
 
 	t.Run("malformed JSON does not panic and leaves cache unchanged", func(t *testing.T) {
 		require.NotPanics(t, func() {
-			binding.updateScanCache(&nopLoggerForCache, SnykMcpToolsDefinition{Name: ToolName.CodeTest}, "not json", "/repo", false)
+			binding.updateScanCache(&nopLoggerForCache, SnykMcpToolsDefinition{Name: ToolName.CodeTest}, "not json", "/repo", "/repo", false)
 		})
 		binding.scanCacheMu.Lock()
 		defer binding.scanCacheMu.Unlock()
@@ -359,7 +364,7 @@ func TestScanCacheEviction_501stDistinctFileEvictsLeastRecentlyUpdated(t *testin
 	// Fill the cache to exactly the cap, one distinct file per call so each
 	// gets a distinct (increasing) updatedAt timestamp.
 	for i := 0; i < MaxScanCacheEntries; i++ {
-		binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile(fmt.Sprintf("file%d.ts", i)), "/repo", false)
+		binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile(fmt.Sprintf("file%d.ts", i)), "/repo", "/repo", false)
 	}
 
 	binding.scanCacheMu.Lock()
@@ -370,7 +375,7 @@ func TestScanCacheEviction_501stDistinctFileEvictsLeastRecentlyUpdated(t *testin
 
 	// One more distinct file pushes the cache over the cap; the
 	// least-recently-updated entry (file0.ts, inserted first) must be evicted.
-	binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile("file-overflow.ts"), "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile("file-overflow.ts"), "/repo", "/repo", false)
 
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
@@ -398,12 +403,12 @@ func TestScanCacheEviction_ReUpsertingExistingFileDoesNotEvict(t *testing.T) {
 	}
 
 	for i := 0; i < MaxScanCacheEntries; i++ {
-		binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile(fmt.Sprintf("file%d.ts", i), "javascript/Rule"), "/repo", false)
+		binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile(fmt.Sprintf("file%d.ts", i), "javascript/Rule"), "/repo", "/repo", false)
 	}
 
 	// Re-scanning an already-cached file at the cap must not evict anything,
 	// since the total distinct-file count doesn't grow.
-	binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile("file0.ts", "javascript/RuleV2"), "/repo", false)
+	binding.updateScanCache(&nopLoggerForCache, toolDef, sarifForFile("file0.ts", "javascript/RuleV2"), "/repo", "/repo", false)
 
 	binding.scanCacheMu.Lock()
 	defer binding.scanCacheMu.Unlock()
@@ -575,4 +580,62 @@ func TestDefaultHandler_ScanCache_BroadThenNarrowerScanSameFile(t *testing.T) {
 	require.False(t, hasOld, "the later scan's own real invocation path must supersede the earlier finding")
 	_, hasNew := entry.ids["sast:javascript/XSS"]
 	require.True(t, hasNew)
+}
+
+func TestDefaultHandler_ScanCache_SingleFileRescanDoesNotClearSiblingFiles(t *testing.T) {
+	// Regression test: normalizeParamsAndDetermineWorkingDir resolves a
+	// single-file "path" argument to that file's *parent directory* for use
+	// as the CLI's cwd. If that same value were reused as the scan-cache's
+	// clear scope (as it once was), rescanning just one file clean would be
+	// wrongly treated as a directory-wide rescan, silently wiping every
+	// sibling file's real, still-vulnerable cache record.
+	fixture := setupTestFixture(t)
+	toolDef := getToolWithName(t, fixture.tools, ToolName.CodeTest)
+	require.NotNil(t, toolDef)
+	handler := fixture.binding.defaultHandler(fixture.invocationContext, *toolDef)
+	tmpDir := t.TempDir()
+
+	dbPath := filepath.Join(tmpDir, "db.ts")
+	viewPath := filepath.Join(tmpDir, "view.ts")
+	require.NoError(t, os.WriteFile(dbPath, []byte("// db\n"), 0o600))
+	require.NoError(t, os.WriteFile(viewPath, []byte("// view\n"), 0o600))
+
+	// Seed both files as vulnerable via a directory-wide scan.
+	bothVulnerableSarif := `{"runs":[{"tool":{"driver":{"rules":[
+		{"id":"javascript/SqlInjection","shortDescription":{"text":"SQLi"},"properties":{"categories":["Security"]}},
+		{"id":"javascript/XSS","shortDescription":{"text":"XSS"},"properties":{"categories":["Security"]}}
+	]}},"results":[
+		{"ruleId":"javascript/SqlInjection","level":"error","locations":[{"physicalLocation":{"artifactLocation":{"uri":"db.ts"},"region":{"startLine":1,"startColumn":1}}}]},
+		{"ruleId":"javascript/XSS","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"view.ts"},"region":{"startLine":1,"startColumn":1}}}]}
+	]}]}`
+	fixture.mockCliOutput(bothVulnerableSarif)
+	_, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{"path": tmpDir}}})
+	require.NoError(t, err)
+
+	fixture.binding.scanCacheMu.Lock()
+	_, dbSeeded := cacheEntries(fixture.binding)[dbPath]
+	_, viewSeeded := cacheEntries(fixture.binding)[viewPath]
+	fixture.binding.scanCacheMu.Unlock()
+	require.True(t, dbSeeded, "sanity check: db.ts must be cached as vulnerable before the single-file rescan")
+	require.True(t, viewSeeded, "sanity check: view.ts must be cached as vulnerable before the single-file rescan")
+
+	// Rescan ONLY db.ts - path is a single file, not the directory - and
+	// report it clean.
+	cleanSarif := `{"runs":[{"tool":{"driver":{"rules":[]}},"results":[]}]}`
+	fixture.mockCliOutput(cleanSarif)
+	result, err := handler(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]interface{}{"path": dbPath}}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	fixture.binding.scanCacheMu.Lock()
+	dbEntry, dbOk := cacheEntries(fixture.binding)[dbPath]
+	viewEntry, viewOk := cacheEntries(fixture.binding)[viewPath]
+	fixture.binding.scanCacheMu.Unlock()
+
+	require.True(t, dbOk)
+	require.Empty(t, dbEntry.ids, "the rescanned file itself must be cleared")
+
+	require.True(t, viewOk, "a sibling file's cache entry must not be wiped by a single-file rescan of a different file")
+	_, viewStillVuln := viewEntry.ids["sast:javascript/XSS"]
+	require.True(t, viewStillVuln, "a single-file rescan must only clear the file it actually targeted, not every file in its parent directory")
 }
