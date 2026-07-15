@@ -516,7 +516,7 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 		clientInfo := ClientInfoFromContext(ctx)
 
 		m.updateGafConfigWithIntegrationEnvironment(invocationCtx, clientInfo.Name, clientInfo.Version)
-		event := analytics.NewAnalyticsEventParam("Send feedback", nil, types.FilePath(path))
+		event := analytics.NewAnalyticsEventParam("Send feedback", nil, types.FilePath(path), m.correlationID)
 		event.Extension = buildSendFeedbackExtension(&logger, int(preventedCount), int(remediatedCount), preventedIDs)
 		go analytics.SendAnalytics(invocationCtx.GetEngine(), "", event, nil)
 
