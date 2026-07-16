@@ -2079,25 +2079,29 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 
 func TestCoerceBreakdown(t *testing.T) {
 	t.Run("NonObjectInput", func(t *testing.T) {
-		require.Nil(t, coerceBreakdown("not an object", severityBreakdownKeys))
-		require.Nil(t, coerceBreakdown(nil, severityBreakdownKeys))
+		require.Nil(t, coerceBreakdown(nil, map[string]any{"field": "not an object"}, "field", severityBreakdownKeys))
+		require.Nil(t, coerceBreakdown(nil, map[string]any{"field": nil}, "field", severityBreakdownKeys))
+		require.Nil(t, coerceBreakdown(nil, map[string]any{}, "field", severityBreakdownKeys))
 	})
 
 	t.Run("EmptyObject", func(t *testing.T) {
-		require.Nil(t, coerceBreakdown(map[string]any{}, severityBreakdownKeys))
+		require.Nil(t, coerceBreakdown(nil, map[string]any{"field": map[string]any{}}, "field", severityBreakdownKeys))
 	})
 
 	t.Run("OnlyRecognizedKeysKept", func(t *testing.T) {
-		got := coerceBreakdown(map[string]any{
+		got := coerceBreakdown(nil, map[string]any{"field": map[string]any{
 			"critical": float64(1),
 			"unknown":  float64(9),
-		}, severityBreakdownKeys)
+		}}, "field", severityBreakdownKeys)
 		require.Equal(t, map[string]int{"critical": 1}, got)
 	})
 
-	t.Run("NonNumericValueDropped", func(t *testing.T) {
-		got := coerceBreakdown(map[string]any{"sast": "not a number", "sca": float64(2)}, scanTypeBreakdownKeys)
+	t.Run("NonNumericValueDroppedAndWarned", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := zerolog.New(&buf)
+		got := coerceBreakdown(&logger, map[string]any{"field": map[string]any{"sast": "not a number", "sca": float64(2)}}, "field", scanTypeBreakdownKeys)
 		require.Equal(t, map[string]int{"sca": 2}, got)
+		require.Contains(t, buf.String(), "not a number")
 	})
 }
 

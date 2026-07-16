@@ -525,13 +525,13 @@ func (m *McpLLMBinding) snykSendFeedback(invocationCtx workflow.InvocationContex
 			remediatedCount:           int(remediatedCount),
 			preventedIDs:              preventedIDs,
 			fixedIDs:                  fixedIDs,
-			fixedIssuesBySeverity:     coerceBreakdown(args["fixedIssuesBySeverity"], severityBreakdownKeys),
-			preventedIssuesBySeverity: coerceBreakdown(args["preventedIssuesBySeverity"], severityBreakdownKeys),
-			fixedIssuesByScanType:     coerceBreakdown(args["fixedIssuesByScanType"], scanTypeBreakdownKeys),
-			outcome:                   mcp.ExtractString(args, "outcome"),
-			breakabilityRisk:          mcp.ExtractString(args, "breakabilityRisk"),
-			breakabilityRiskSource:    mcp.ExtractString(args, "breakabilityRiskSource"),
-			strategy:                  mcp.ExtractString(args, "strategy"),
+			fixedIssuesBySeverity:     coerceBreakdown(&logger, args, "fixedIssuesBySeverity", severityBreakdownKeys),
+			preventedIssuesBySeverity: coerceBreakdown(&logger, args, "preventedIssuesBySeverity", severityBreakdownKeys),
+			fixedIssuesByScanType:     coerceBreakdown(&logger, args, "fixedIssuesByScanType", scanTypeBreakdownKeys),
+			outcome:                   remediationOutcome(mcp.ExtractString(args, "outcome")),
+			breakabilityRisk:          breakabilityRiskLevel(mcp.ExtractString(args, "breakabilityRisk")),
+			breakabilityRiskSource:    breakabilityRiskSourceKind(mcp.ExtractString(args, "breakabilityRiskSource")),
+			strategy:                  remediationStrategy(mcp.ExtractString(args, "strategy")),
 			testsPassed:               coerceOptionalBoolPtr(args["testsPassed"]),
 		})
 		go analytics.SendAnalytics(invocationCtx.GetEngine(), "", event, nil)
@@ -561,15 +561,16 @@ var (
 	scanTypeBreakdownKeys = []string{"sast", "sca"}
 )
 
-// coerceBreakdown converts a JSON-decoded object argument (`map[string]any`)
-// into a `map[string]int`, keeping only the supplied keys and only values
-// that decode as numbers.
-// Returns nil when the input isn't an object or no recognized key is
+// coerceBreakdown extracts the argKey field of args and converts it into a
+// `map[string]int`, keeping only the supplied keys and only values that
+// decode as numbers.
+// Returns nil when the field isn't an object or no recognized key is
 // present, so callers can omit the extension key entirely rather than
-// sending an empty map.
-func coerceBreakdown(v any, keys []string) map[string]int {
-	raw, ok := v.(map[string]any)
-	if !ok {
+// sending an empty map. Logs a warning (rather than silently dropping) when a
+// recognized key is present with a non-numeric value.
+func coerceBreakdown(logger *zerolog.Logger, args map[string]any, argKey string, keys []string) map[string]int {
+	raw := mcp.ExtractMap(args, argKey)
+	if raw == nil {
 		return nil
 	}
 	out := make(map[string]int)
@@ -578,9 +579,17 @@ func coerceBreakdown(v any, keys []string) map[string]int {
 		if !exists {
 			continue
 		}
-		if f, ok := val.(float64); ok {
-			out[key] = int(f)
+		f, ok := val.(float64)
+		if !ok {
+			if logger != nil {
+				logger.Warn().
+					Str("field", argKey).
+					Str("key", key).
+					Msg("breakdown value is not a number; dropping")
+			}
+			continue
 		}
+		out[key] = int(f)
 	}
 	if len(out) == 0 {
 		return nil
@@ -599,6 +608,16 @@ func coerceOptionalBoolPtr(v any) *bool {
 	return &b
 }
 
+// remediationOutcome, breakabilityRiskLevel, breakabilityRiskSourceKind, and
+// remediationStrategy are distinct string types (not bare strings) for the
+// enum-shaped sendFeedbackParams fields below, so a copy-paste swap between
+// two of these fields fails to compile instead of silently mislabeling the
+// analytics event.
+type remediationOutcome string
+type breakabilityRiskLevel string
+type breakabilityRiskSourceKind string
+type remediationStrategy string
+
 // sendFeedbackParams holds every optional/required argument parsed from a
 // snyk_send_feedback call, used to build the analytics event Extension map.
 type sendFeedbackParams struct {
@@ -609,10 +628,10 @@ type sendFeedbackParams struct {
 	fixedIssuesBySeverity     map[string]int
 	preventedIssuesBySeverity map[string]int
 	fixedIssuesByScanType     map[string]int
-	outcome                   string
-	breakabilityRisk          string
-	breakabilityRiskSource    string
-	strategy                  string
+	outcome                   remediationOutcome
+	breakabilityRisk          breakabilityRiskLevel
+	breakabilityRiskSource    breakabilityRiskSourceKind
+	strategy                  remediationStrategy
 	testsPassed               *bool
 }
 
@@ -640,32 +659,28 @@ func buildSendFeedbackExtension(logger *zerolog.Logger, p sendFeedbackParams) ma
 		"mcp::preventedIssuesCount":  p.preventedCount,
 		"mcp::remediatedIssuesCount": p.remediatedCount,
 	}
-	if len(p.preventedIDs) > 0 {
-		ext["mcp::preventedIssueIds"] = p.preventedIDs
+
+	// Each optional richness field is added only when present, so callers can
+	// omit fields they haven't computed rather than sending zero values.
+	optionalFields := []struct {
+		key     string
+		value   any
+		present bool
+	}{
+		{"mcp::preventedIssueIds", p.preventedIDs, len(p.preventedIDs) > 0},
+		{"mcp::fixedIssueIds", p.fixedIDs, len(p.fixedIDs) > 0},
+		{"mcp::fixedIssuesBySeverity", p.fixedIssuesBySeverity, len(p.fixedIssuesBySeverity) > 0},
+		{"mcp::preventedIssuesBySeverity", p.preventedIssuesBySeverity, len(p.preventedIssuesBySeverity) > 0},
+		{"mcp::fixedIssuesByScanType", p.fixedIssuesByScanType, len(p.fixedIssuesByScanType) > 0},
+		{"mcp::outcome", string(p.outcome), p.outcome != ""},
+		{"mcp::breakabilityRisk", string(p.breakabilityRisk), p.breakabilityRisk != ""},
+		{"mcp::breakabilityRiskSource", string(p.breakabilityRiskSource), p.breakabilityRiskSource != ""},
+		{"mcp::strategy", string(p.strategy), p.strategy != ""},
 	}
-	if len(p.fixedIDs) > 0 {
-		ext["mcp::fixedIssueIds"] = p.fixedIDs
-	}
-	if len(p.fixedIssuesBySeverity) > 0 {
-		ext["mcp::fixedIssuesBySeverity"] = p.fixedIssuesBySeverity
-	}
-	if len(p.preventedIssuesBySeverity) > 0 {
-		ext["mcp::preventedIssuesBySeverity"] = p.preventedIssuesBySeverity
-	}
-	if len(p.fixedIssuesByScanType) > 0 {
-		ext["mcp::fixedIssuesByScanType"] = p.fixedIssuesByScanType
-	}
-	if p.outcome != "" {
-		ext["mcp::outcome"] = p.outcome
-	}
-	if p.breakabilityRisk != "" {
-		ext["mcp::breakabilityRisk"] = p.breakabilityRisk
-	}
-	if p.breakabilityRiskSource != "" {
-		ext["mcp::breakabilityRiskSource"] = p.breakabilityRiskSource
-	}
-	if p.strategy != "" {
-		ext["mcp::strategy"] = p.strategy
+	for _, f := range optionalFields {
+		if f.present {
+			ext[f.key] = f.value
+		}
 	}
 	if p.testsPassed != nil {
 		ext["mcp::testsPassed"] = *p.testsPassed
