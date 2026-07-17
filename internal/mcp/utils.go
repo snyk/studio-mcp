@@ -88,28 +88,44 @@ func buildArg(key string, param convertedToolParameter) string {
 func createToolFromDefinition(toolDef *SnykMcpToolsDefinition) mcp.Tool {
 	opts := []mcp.ToolOption{mcp.WithDescription(toolDef.Description)}
 	for _, param := range toolDef.Params {
-		propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
-		if param.IsRequired {
-			propOpts = append(propOpts, mcp.Required())
-		}
 		switch param.Type {
 		case "string":
+			propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
 			if len(param.Enum) > 0 {
 				propOpts = append(propOpts, mcp.Enum(param.Enum...))
 			}
+			if param.IsRequired {
+				propOpts = append(propOpts, mcp.Required())
+			}
 			opts = append(opts, mcp.WithString(param.Name, propOpts...))
 		case "boolean":
-			opts = append(opts, mcp.WithBoolean(param.Name, propOpts...))
+			if param.IsRequired {
+				opts = append(opts, mcp.WithBoolean(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				opts = append(opts, mcp.WithBoolean(param.Name, mcp.Description(param.Description)))
+			}
 		case "number":
-			opts = append(opts, mcp.WithNumber(param.Name, propOpts...))
+			if param.IsRequired {
+				opts = append(opts, mcp.WithNumber(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				opts = append(opts, mcp.WithNumber(param.Name, mcp.Description(param.Description)))
+			}
 		case "array":
+			propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
 			if param.Items != nil {
 				propOpts = append(propOpts, mcp.Items(param.Items))
 			}
+			if param.IsRequired {
+				propOpts = append(propOpts, mcp.Required())
+			}
 			opts = append(opts, mcp.WithArray(param.Name, propOpts...))
 		case "object":
+			propOpts := []mcp.PropertyOption{mcp.Description(param.Description)}
 			if param.Properties != nil {
 				propOpts = append(propOpts, mcp.Properties(param.Properties))
+			}
+			if param.IsRequired {
+				propOpts = append(propOpts, mcp.Required())
 			}
 			opts = append(opts, mcp.WithObject(param.Name, propOpts...))
 		}
