@@ -714,7 +714,7 @@
     },
     {
       "name": "snyk_send_feedback",
-      "description": "Report ONLY the delta (this run only) of Snyk issues. Use preventedIssuesCount if the model prevented introducing a vulnerability in new code. Use fixedExistingIssuesCount if the model repaired an issue in existing code. When the calling tool/hook supplies specific Snyk vuln IDs, pass them in preventedIssueIds. Counts must NEVER be cumulative. Always send an absolute path.",
+      "description": "Report ONLY the delta (this run only) of Snyk issues. Use preventedIssuesCount if the model prevented introducing a vulnerability in new code. Use fixedExistingIssuesCount if the model repaired an issue in existing code. When the calling tool/hook supplies specific Snyk vuln IDs, pass them in preventedIssueIds (prevention) or fixedIssueIds (remediation). Optional richness fields (severity/scan-type breakdowns, outcome, breakabilityRisk, strategy, testsPassed) may be included when already computed by the caller. Counts must NEVER be cumulative. Always send an absolute path.",
       "command": [],
       "standardParams": [],
       "profiles": ["full","lite","experimental"],
@@ -750,6 +750,81 @@
           "items": { "type": "string" },
           "isRequired": false,
           "description": "Optional list of Snyk vuln IDs that the caller detected and is asking the model to fix. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match preventedIssuesCount; the count remains authoritative."
+        },
+        {
+          "name": "fixedIssueIds",
+          "type": "array",
+          "items": { "type": "string" },
+          "isRequired": false,
+          "description": "Optional list of Snyk vuln IDs that were fixed in pre-existing code during this run. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match fixedExistingIssuesCount; the count remains authoritative."
+        },
+        {
+          "name": "fixedIssuesBySeverity",
+          "type": "object",
+          "isRequired": false,
+          "properties": {
+            "critical": { "type": "number" },
+            "high": { "type": "number" },
+            "medium": { "type": "number" },
+            "low": { "type": "number" }
+          },
+          "description": "Optional per-severity breakdown (critical/high/medium/low counts) of fixedExistingIssuesCount. Populated by remediation callers (snyk-fix.md, snyk-batch-fix.md, skills/snyk-fix/SKILL.md)."
+        },
+        {
+          "name": "preventedIssuesBySeverity",
+          "type": "object",
+          "isRequired": false,
+          "properties": {
+            "critical": { "type": "number" },
+            "high": { "type": "number" },
+            "medium": { "type": "number" },
+            "low": { "type": "number" }
+          },
+          "description": "Optional per-severity breakdown (critical/high/medium/low counts) of preventedIssuesCount. Populated by the secure-at-inception Stop Hook. Distinct from fixedIssuesBySeverity."
+        },
+        {
+          "name": "fixedIssuesByScanType",
+          "type": "object",
+          "isRequired": false,
+          "properties": {
+            "sast": { "type": "number" },
+            "sca": { "type": "number" }
+          },
+          "description": "Optional scan-type breakdown (sast/sca counts) of the issue IDs named in fixedIssueIds, decomposing fixedExistingIssuesCount. Remediation-only; not populated by the secure-at-inception Stop Hook."
+        },
+        {
+          "name": "outcome",
+          "type": "string",
+          "isRequired": false,
+          "enum": ["applied", "blocked", "advisory", "no_fix_available", "allowed"],
+          "description": "Optional outcome of the remediation attempt. Remediation-only; not populated by the secure-at-inception Stop Hook."
+        },
+        {
+          "name": "breakabilityRisk",
+          "type": "string",
+          "isRequired": false,
+          "enum": ["low", "medium", "high", "unknown"],
+          "description": "Optional breaking-change risk assessed for the package upgrade used to fix the issue."
+        },
+        {
+          "name": "breakabilityRiskSource",
+          "type": "string",
+          "isRequired": false,
+          "enum": ["api", "heuristic"],
+          "description": "Optional source of breakabilityRisk: 'api' when derived from the real Breakability API, 'heuristic' when derived from the semver+usage-analysis fallback."
+        },
+        {
+          "name": "strategy",
+          "type": "string",
+          "isRequired": false,
+          "enum": ["Direct Upgrade", "Parent Upgrade", "Transitive Fix"],
+          "description": "Optional remediation strategy identifier used for the fix."
+        },
+        {
+          "name": "testsPassed",
+          "type": "boolean",
+          "isRequired": false,
+          "description": "Optional flag indicating whether tests passed after applying the fix."
         }
       ]
     },
