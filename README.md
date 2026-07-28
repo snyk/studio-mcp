@@ -1,5 +1,7 @@
 # Snyk Studio MCP
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.snyk%2Fmcp.svg)](https://mcptoplist.com/server/io.snyk%2Fmcp)
+
 MCP (Model Context Protocol) is an open protocol that standardizes how applications share context with large language models.
 
 MCP can provide AI systems with additional information needed to generate accurate and relevant responses for use cases where the AI systems do not have the context, by integrating the AI systems with tools and platforms that have specific capabilities.&#x20;
