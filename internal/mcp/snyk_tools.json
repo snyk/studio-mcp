@@ -749,14 +749,14 @@
           "type": "array",
           "items": { "type": "string" },
           "isRequired": false,
-          "description": "Optional list of Snyk vuln IDs that the caller detected and is asking the model to fix. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match preventedIssuesCount; the count remains authoritative."
+          "description": "Optional list of Snyk vuln IDs that the caller detected and is asking the model to fix. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match preventedIssuesCount; the count remains authoritative. Pass as an array; it is emitted as a JSON-encoded string in the analytics extension."
         },
         {
           "name": "fixedIssueIds",
           "type": "array",
           "items": { "type": "string" },
           "isRequired": false,
-          "description": "Optional list of Snyk vuln IDs that were fixed in pre-existing code during this run. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match fixedExistingIssuesCount; the count remains authoritative."
+          "description": "Optional list of Snyk vuln IDs that were fixed in pre-existing code during this run. Prefix each entry with scan type: 'sast:<ruleId>' (e.g. 'sast:javascript/SqlInjection') or 'sca:<snykId>' (e.g. 'sca:SNYK-JS-LODASH-1234567'). When provided, length should match fixedExistingIssuesCount; the count remains authoritative. Pass as an array; it is emitted as a JSON-encoded string in the analytics extension."
         },
         {
           "name": "fixedIssuesBySeverity",
@@ -768,7 +768,7 @@
             "medium": { "type": "number" },
             "low": { "type": "number" }
           },
-          "description": "Optional per-severity breakdown (critical/high/medium/low counts) of fixedExistingIssuesCount. Populated by remediation callers (snyk-fix.md, snyk-batch-fix.md, skills/snyk-fix/SKILL.md)."
+          "description": "Optional per-severity breakdown (critical/high/medium/low counts) of fixedExistingIssuesCount. Populated by remediation callers (snyk-fix.md, snyk-batch-fix.md, skills/snyk-fix/SKILL.md). Pass as an object; each present bucket is emitted as a flat scalar key (mcp::fixedIssuesCritical, mcp::fixedIssuesHigh, mcp::fixedIssuesMedium, mcp::fixedIssuesLow)."
         },
         {
           "name": "preventedIssuesBySeverity",
@@ -780,7 +780,7 @@
             "medium": { "type": "number" },
             "low": { "type": "number" }
           },
-          "description": "Optional per-severity breakdown (critical/high/medium/low counts) of preventedIssuesCount. Populated by the secure-at-inception Stop Hook. Distinct from fixedIssuesBySeverity."
+          "description": "Optional per-severity breakdown (critical/high/medium/low counts) of preventedIssuesCount. Populated by the secure-at-inception Stop Hook. Distinct from fixedIssuesBySeverity. Pass as an object; each present bucket is emitted as a flat scalar key (mcp::preventedIssuesCritical, mcp::preventedIssuesHigh, mcp::preventedIssuesMedium, mcp::preventedIssuesLow)."
         },
         {
           "name": "fixedIssuesByScanType",
@@ -790,7 +790,7 @@
             "sast": { "type": "number" },
             "sca": { "type": "number" }
           },
-          "description": "Optional scan-type breakdown (sast/sca counts) of the issue IDs named in fixedIssueIds, decomposing fixedExistingIssuesCount. Remediation-only; not populated by the secure-at-inception Stop Hook."
+          "description": "Optional scan-type breakdown (sast/sca counts) of the issue IDs named in fixedIssueIds, decomposing fixedExistingIssuesCount. Remediation-only; not populated by the secure-at-inception Stop Hook. Pass as an object; each present bucket is emitted as a flat scalar key (mcp::fixedIssuesSast, mcp::fixedIssuesSca)."
         },
         {
           "name": "outcome",
