@@ -635,8 +635,56 @@ type sendFeedbackParams struct {
 	testsPassed               *bool
 }
 
+// scalarExtension is the single funnel for analytics extension writes: the
+// typed setters are the only way to add a value, so an array or object can
+// never reach the endpoint, which rejects the whole event if any extension
+// value is not a scalar (string/int/bool/number).
+type scalarExtension map[string]any
+
+func (e scalarExtension) setString(key, value string) { e[key] = value }
+func (e scalarExtension) setInt(key string, value int) { e[key] = value }
+func (e scalarExtension) setBool(key string, value bool) { e[key] = value }
+
+// addIssueIDs serializes an issue-ID list to a JSON-array string under key; the
+// downstream decode recovers the list by parsing the string. An empty list
+// omits the key entirely.
+func addIssueIDs(ext scalarExtension, key string, ids []string, logger *zerolog.Logger) {
+	if len(ids) == 0 {
+		return
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		if logger != nil {
+			logger.Warn().Str("key", key).Err(err).Msg("failed to encode issue IDs; omitting")
+		}
+		return
+	}
+	ext.setString(key, string(encoded))
+}
+
+// addBreakdown flattens a per-bucket breakdown into one scalar key per present
+// bucket, named prefix+CapitalizedBucket (e.g. "mcp::preventedIssues"+"Critical").
+// Absent buckets emit no key.
+func addBreakdown(ext scalarExtension, prefix string, breakdown map[string]int, buckets []string) {
+	for _, bucket := range buckets {
+		count, ok := breakdown[bucket]
+		if !ok {
+			continue
+		}
+		ext.setInt(prefix+capitalize(bucket), count)
+	}
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 // buildSendFeedbackExtension builds the analytics event Extension map for
-// snyk_send_feedback.
+// snyk_send_feedback. Issue-ID lists become JSON-encoded strings and
+// severity/scan-type breakdowns are flattened into per-bucket integer keys.
 // Logs a warning when the supplied preventedIssueIds/fixedIssueIds length
 // disagrees with its corresponding count; the count remains authoritative
 // for the metric.
@@ -655,36 +703,34 @@ func buildSendFeedbackExtension(logger *zerolog.Logger, p sendFeedbackParams) ma
 			Int("fixedIssueIdsLen", len(p.fixedIDs)).
 			Msg("fixedIssueIds length does not match fixedExistingIssuesCount; count is authoritative")
 	}
-	ext := map[string]any{
-		"mcp::preventedIssuesCount":  p.preventedCount,
-		"mcp::remediatedIssuesCount": p.remediatedCount,
-	}
 
-	// Each optional richness field is added only when present, so callers can
-	// omit fields they haven't computed rather than sending zero values.
-	optionalFields := []struct {
-		key     string
-		value   any
-		present bool
-	}{
-		{"mcp::preventedIssueIds", p.preventedIDs, len(p.preventedIDs) > 0},
-		{"mcp::fixedIssueIds", p.fixedIDs, len(p.fixedIDs) > 0},
-		{"mcp::fixedIssuesBySeverity", p.fixedIssuesBySeverity, len(p.fixedIssuesBySeverity) > 0},
-		{"mcp::preventedIssuesBySeverity", p.preventedIssuesBySeverity, len(p.preventedIssuesBySeverity) > 0},
-		{"mcp::fixedIssuesByScanType", p.fixedIssuesByScanType, len(p.fixedIssuesByScanType) > 0},
-		{"mcp::outcome", string(p.outcome), p.outcome != ""},
-		{"mcp::breakabilityRisk", string(p.breakabilityRisk), p.breakabilityRisk != ""},
-		{"mcp::breakabilityRiskSource", string(p.breakabilityRiskSource), p.breakabilityRiskSource != ""},
-		{"mcp::strategy", string(p.strategy), p.strategy != ""},
+	ext := scalarExtension{}
+	ext.setInt("mcp::preventedIssuesCount", p.preventedCount)
+	ext.setInt("mcp::remediatedIssuesCount", p.remediatedCount)
+
+	addIssueIDs(ext, "mcp::preventedIssueIds", p.preventedIDs, logger)
+	addIssueIDs(ext, "mcp::fixedIssueIds", p.fixedIDs, logger)
+
+	addBreakdown(ext, "mcp::preventedIssues", p.preventedIssuesBySeverity, severityBreakdownKeys)
+	addBreakdown(ext, "mcp::fixedIssues", p.fixedIssuesBySeverity, severityBreakdownKeys)
+	addBreakdown(ext, "mcp::fixedIssues", p.fixedIssuesByScanType, scanTypeBreakdownKeys)
+
+	if p.outcome != "" {
+		ext.setString("mcp::outcome", string(p.outcome))
 	}
-	for _, f := range optionalFields {
-		if f.present {
-			ext[f.key] = f.value
-		}
+	if p.breakabilityRisk != "" {
+		ext.setString("mcp::breakabilityRisk", string(p.breakabilityRisk))
+	}
+	if p.breakabilityRiskSource != "" {
+		ext.setString("mcp::breakabilityRiskSource", string(p.breakabilityRiskSource))
+	}
+	if p.strategy != "" {
+		ext.setString("mcp::strategy", string(p.strategy))
 	}
 	if p.testsPassed != nil {
-		ext["mcp::testsPassed"] = *p.testsPassed
+		ext.setBool("mcp::testsPassed", *p.testsPassed)
 	}
+
 	return ext
 }
 

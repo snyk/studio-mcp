@@ -1913,7 +1913,7 @@ func TestSnykSendFeedbackHandler_FixedIssueIds(t *testing.T) {
 
 	payloads := capture.all()
 	require.Len(t, payloads, 1)
-	require.Contains(t, string(payloads[0]), `"mcp::fixedIssueIds":["sast:javascript/SqlInjection"]`)
+	require.Contains(t, string(payloads[0]), `"mcp::fixedIssueIds":"[\"sast:javascript/SqlInjection\"]"`)
 }
 
 // TestSnykSendFeedbackHandler_PreventedIssuesBySeverityLiteralKey guards
@@ -1950,9 +1950,9 @@ func TestSnykSendFeedbackHandler_PreventedIssuesBySeverityLiteralKey(t *testing.
 
 	payloads := capture.all()
 	require.Len(t, payloads, 1)
-	require.Contains(t, string(payloads[0]), `"mcp::preventedIssuesBySeverity"`)
-	require.Contains(t, string(payloads[0]), `"critical":1`)
-	require.Contains(t, string(payloads[0]), `"high":2`)
+	require.NotContains(t, string(payloads[0]), `"mcp::preventedIssuesBySeverity"`)
+	require.Contains(t, string(payloads[0]), `"mcp::preventedIssuesCritical":1`)
+	require.Contains(t, string(payloads[0]), `"mcp::preventedIssuesHigh":2`)
 }
 
 func TestCoerceStringSlice(t *testing.T) {
@@ -1996,7 +1996,7 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 		var buf bytes.Buffer
 		logger := zerolog.New(&buf)
 		ext := buildSendFeedbackExtension(&logger, sendFeedbackParams{preventedCount: 2, preventedIDs: ids})
-		require.Equal(t, ids, ext["mcp::preventedIssueIds"])
+		require.Equal(t, `["sast:javascript/SqlInjection","sca:SNYK-JS-LODASH-1234567"]`, ext["mcp::preventedIssueIds"])
 		require.Empty(t, buf.String(), "no warning expected when length matches count")
 	})
 
@@ -2005,7 +2005,7 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 		var buf bytes.Buffer
 		logger := zerolog.New(&buf)
 		ext := buildSendFeedbackExtension(&logger, sendFeedbackParams{preventedCount: 3, preventedIDs: ids})
-		require.Equal(t, ids, ext["mcp::preventedIssueIds"])
+		require.Equal(t, `["sast:a","sast:b"]`, ext["mcp::preventedIssueIds"])
 		require.Contains(t, buf.String(), "does not match")
 	})
 
@@ -2018,7 +2018,7 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 	t.Run("FixedIssueIdsMirrorsPreventedIssueIds", func(t *testing.T) {
 		ids := []string{"sast:javascript/SqlInjection"}
 		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{remediatedCount: 1, fixedIDs: ids})
-		require.Equal(t, ids, ext["mcp::fixedIssueIds"])
+		require.Equal(t, `["sast:javascript/SqlInjection"]`, ext["mcp::fixedIssueIds"])
 	})
 
 	t.Run("FixedIssueIdsCountMismatchLogsWarning", func(t *testing.T) {
@@ -2026,14 +2026,14 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 		var buf bytes.Buffer
 		logger := zerolog.New(&buf)
 		ext := buildSendFeedbackExtension(&logger, sendFeedbackParams{remediatedCount: 1, fixedIDs: ids})
-		require.Equal(t, ids, ext["mcp::fixedIssueIds"])
+		require.Equal(t, `["sast:a","sast:b"]`, ext["mcp::fixedIssueIds"])
 		require.Contains(t, buf.String(), "does not match")
 	})
 
 	t.Run("RichnessFieldsAllOmittedWhenAbsent", func(t *testing.T) {
 		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 1})
 		for _, key := range []string{
-			"mcp::fixedIssuesBySeverity", "mcp::preventedIssuesBySeverity", "mcp::fixedIssuesByScanType",
+			"mcp::preventedIssuesCritical", "mcp::fixedIssuesHigh", "mcp::fixedIssuesSast",
 			"mcp::outcome", "mcp::breakabilityRisk", "mcp::breakabilityRiskSource", "mcp::strategy",
 			"mcp::testsPassed",
 		} {
@@ -2055,9 +2055,13 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 			strategy:                  "A",
 			testsPassed:               &testsPassed,
 		})
-		require.Equal(t, map[string]int{"high": 1}, ext["mcp::fixedIssuesBySeverity"])
-		require.Equal(t, map[string]int{"critical": 2}, ext["mcp::preventedIssuesBySeverity"])
-		require.Equal(t, map[string]int{"sast": 1, "sca": 1}, ext["mcp::fixedIssuesByScanType"])
+		require.Equal(t, 1, ext["mcp::fixedIssuesHigh"])
+		require.Equal(t, 2, ext["mcp::preventedIssuesCritical"])
+		require.Equal(t, 1, ext["mcp::fixedIssuesSast"])
+		require.Equal(t, 1, ext["mcp::fixedIssuesSca"])
+		require.NotContains(t, ext, "mcp::fixedIssuesBySeverity")
+		require.NotContains(t, ext, "mcp::preventedIssuesBySeverity")
+		require.NotContains(t, ext, "mcp::fixedIssuesByScanType")
 		require.Equal(t, "applied", ext["mcp::outcome"])
 		require.Equal(t, "low", ext["mcp::breakabilityRisk"])
 		require.Equal(t, "api", ext["mcp::breakabilityRiskSource"])
@@ -2072,8 +2076,84 @@ func TestBuildSendFeedbackExtension(t *testing.T) {
 			fixedIssuesBySeverity:     map[string]int{"low": 1},
 			preventedIssuesBySeverity: map[string]int{"low": 2},
 		})
-		require.Equal(t, map[string]int{"low": 1}, ext["mcp::fixedIssuesBySeverity"])
-		require.Equal(t, map[string]int{"low": 2}, ext["mcp::preventedIssuesBySeverity"])
+		require.Equal(t, 1, ext["mcp::fixedIssuesLow"])
+		require.Equal(t, 2, ext["mcp::preventedIssuesLow"])
+	})
+
+	t.Run("EveryExtensionValueIsScalar", func(t *testing.T) {
+		testsPassed := true
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{
+			preventedCount:            1,
+			remediatedCount:           2,
+			preventedIDs:              []string{"sast:go/XSS"},
+			fixedIDs:                  []string{"sast:go/SQLi", "sca:SNYK-JS-LODASH-1"},
+			fixedIssuesBySeverity:     map[string]int{"critical": 1, "high": 2},
+			preventedIssuesBySeverity: map[string]int{"low": 1},
+			fixedIssuesByScanType:     map[string]int{"sast": 1, "sca": 1},
+			outcome:                   "applied",
+			breakabilityRisk:          "low",
+			breakabilityRiskSource:    "api",
+			strategy:                  "A",
+			testsPassed:               &testsPassed,
+		})
+		for key, value := range ext {
+			switch value.(type) {
+			case string, int, bool:
+			default:
+				require.Failf(t, "non-scalar extension value", "key %s has non-scalar type %T", key, value)
+			}
+		}
+	})
+
+	t.Run("IssueIDStringRoundTrips", func(t *testing.T) {
+		ids := []string{"sast:go/XSS", "sca:SNYK-JS-LODASH-1"}
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{preventedCount: 2, preventedIDs: ids})
+		encoded, ok := ext["mcp::preventedIssueIds"].(string)
+		require.True(t, ok, "preventedIssueIds must be encoded as a string")
+		var decoded []string
+		require.NoError(t, json.Unmarshal([]byte(encoded), &decoded))
+		require.Equal(t, ids, decoded)
+	})
+
+	t.Run("BreakdownFlattensPresentBucketsAndOmitsAbsent", func(t *testing.T) {
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{
+			preventedCount:            3,
+			preventedIssuesBySeverity: map[string]int{"critical": 1, "high": 2},
+			fixedIssuesByScanType:     map[string]int{"sast": 1, "sca": 0},
+		})
+		require.Equal(t, 1, ext["mcp::preventedIssuesCritical"])
+		require.Equal(t, 2, ext["mcp::preventedIssuesHigh"])
+		require.NotContains(t, ext, "mcp::preventedIssuesMedium")
+		require.NotContains(t, ext, "mcp::preventedIssuesLow")
+		require.Equal(t, 1, ext["mcp::fixedIssuesSast"])
+		require.Equal(t, 0, ext["mcp::fixedIssuesSca"])
+	})
+
+	t.Run("KeyCountStaysWithinCap", func(t *testing.T) {
+		// maxExtensionKeys is the analytics endpoint's cap on the number of
+		// interaction.extension keys it surfaces to its downstream log view.
+		// Kept test-only: it is a build-time tripwire, so adding a richness
+		// field that pushes a real event over the cap fails here rather than
+		// silently dropping events in production.
+		const maxExtensionKeys = 15
+
+		testsPassed := true
+		// A remediation event never also carries prevention breakdowns, so this
+		// worst case bounds the key count for any real event.
+		ext := buildSendFeedbackExtension(nil, sendFeedbackParams{
+			preventedCount:         0,
+			remediatedCount:        7,
+			fixedIDs:               []string{"sast:go/SQLi"},
+			fixedIssuesBySeverity:  map[string]int{"critical": 1, "high": 2, "medium": 3, "low": 1},
+			fixedIssuesByScanType:  map[string]int{"sast": 6, "sca": 1},
+			outcome:                "applied",
+			breakabilityRisk:       "low",
+			breakabilityRiskSource: "api",
+			strategy:               "Direct Upgrade",
+			testsPassed:            &testsPassed,
+		})
+		require.LessOrEqual(t, len(ext), maxExtensionKeys,
+			"emitted extension key count must stay within the analytics cap")
 	})
 }
 
