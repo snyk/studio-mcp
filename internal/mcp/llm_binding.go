@@ -20,21 +20,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/auth"
 	gafNetworking "github.com/snyk/go-application-framework/pkg/networking"
 	"github.com/snyk/studio-mcp/internal/logging"
-	"github.com/snyk/studio-mcp/internal/networking"
 	"github.com/snyk/studio-mcp/internal/trust"
 	"github.com/snyk/studio-mcp/internal/types"
 	"golang.org/x/exp/slices"
@@ -45,8 +40,9 @@ import (
 )
 
 const (
-	TransportParam     string = "transport"
-	SseTransportType   string = "sse"
+	TransportParam string = "transport"
+	// StdioTransportType is the only supported transport. The SSE transport has
+	// been retired; see the transport check in Start for how it is rejected.
 	StdioTransportType string = "stdio"
 )
 
@@ -55,9 +51,7 @@ const (
 type McpLLMBinding struct {
 	logger          *zerolog.Logger
 	mcpServer       *server.MCPServer
-	sseServer       *server.SSEServer
 	folderTrust     *trust.FolderTrust
-	baseURL         *url.URL
 	mutex           sync.RWMutex
 	started         bool
 	cliPath         string
@@ -99,6 +93,10 @@ func (m *McpLLMBinding) mintCorrelationID() {
 
 // Start starts the MCP server. It blocks until the server is stopped via Shutdown.
 func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) error {
+	if err := validateTransport(invocationContext.GetConfiguration().GetString(TransportParam)); err != nil {
+		return err
+	}
+
 	m.mintCorrelationID()
 
 	runTimeInfo := invocationContext.GetRuntimeInfo()
@@ -133,15 +131,22 @@ func (m *McpLLMBinding) Start(invocationContext workflow.InvocationContext) erro
 		return err
 	}
 
-	transportType := invocationContext.GetConfiguration().GetString(TransportParam)
-	switch transportType {
-	case StdioTransportType:
-		return m.HandleStdioServer()
-	case SseTransportType:
-		return m.HandleSseServer()
-	default:
-		return fmt.Errorf("invalid transport type: %s", transportType)
+	return m.HandleStdioServer()
+}
+
+// validateTransport accepts only stdio. An unset transport means the caller
+// expressed no preference, which now unambiguously resolves to stdio. Anything
+// else — most likely the retired "sse" value left over in an old client
+// config — is rejected with a message pointing at the fix.
+func validateTransport(transportType string) error {
+	if transportType == "" || transportType == StdioTransportType {
+		return nil
 	}
+
+	return fmt.Errorf(
+		"unsupported transport type %q: only %q is supported, update your MCP client configuration to use %q",
+		transportType, StdioTransportType, StdioTransportType,
+	)
 }
 
 func (m *McpLLMBinding) HandleStdioServer() error {
@@ -159,71 +164,16 @@ func (m *McpLLMBinding) HandleStdioServer() error {
 	return nil
 }
 
-func (m *McpLLMBinding) HandleSseServer() error {
-	// listen on default url/port if none was configured
-	if m.baseURL == nil {
-		defaultUrl, err := networking.LoopbackURL()
-		if err != nil {
-			return err
-		}
-		m.baseURL = defaultUrl
-	}
-
-	m.sseServer = server.NewSSEServer(m.mcpServer, server.WithBaseURL(m.baseURL.String()))
-
-	endpoint := m.baseURL.String() + "/sse"
-
-	m.logger.Info().Str("baseURL", endpoint).Msg("starting")
-	go func() {
-		// sleep initially for a few milliseconds so we actually can start the server
-		time.Sleep(100 * time.Millisecond)
-		for !networking.IsPortInUse(m.baseURL) {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		m.mutex.Lock()
-		m.logger.Info().Str("baseURL", endpoint).Msg("started")
-		m.started = true
-		m.mutex.Unlock()
-	}()
-
-	srv := &http.Server{
-		Addr:    m.baseURL.Host,
-		Handler: middleware(m.sseServer),
-	}
-
-	err := srv.ListenAndServe()
-
-	if err != nil {
-		// expect http.ErrServerClosed when shutting down
-		if !errors.Is(err, http.ErrServerClosed) {
-			m.logger.Error().Err(err).Msg("Error starting MCP SSE server")
-		}
-		return err
-	}
-	return nil
-}
-
-func middleware(sseServer *server.SSEServer) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if networking.IsValidLoopbackRequest(r) {
-			sseServer.ServeHTTP(w, r)
-		} else {
-			http.Error(w, "Forbidden: Access restricted to localhost origins", http.StatusForbidden)
-		}
-	})
-}
-
-func (m *McpLLMBinding) Shutdown(ctx context.Context) {
+// Shutdown stops the MCP server. The stdio transport owns no listener and no
+// connections of its own — it lives and dies with the process's standard
+// streams — so there is nothing to tear down beyond marking the server as no
+// longer started. The method is kept so callers have a single shutdown hook.
+func (m *McpLLMBinding) Shutdown(_ context.Context) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	if m.sseServer != nil {
-		err := m.sseServer.Shutdown(ctx)
-		if err != nil {
-			m.logger.Error().Err(err).Msg("Error shutting down MCP SSE server")
-		}
-	}
+	m.started = false
+	m.logger.Debug().Msg("MCP Stdio server shut down")
 }
 
 func (m *McpLLMBinding) Started() bool {

@@ -42,7 +42,7 @@ var WORKFLOWID_MCP_CONFIG = workflow.NewWorkflowIdentifier("mcp.configure")
 
 func Init(engine workflow.Engine) error {
 	mcpFlags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
-	mcpFlags.StringP(mcp.TransportParam, "t", "sse", "sets transport to <sse|stdio>")
+	mcpFlags.StringP(mcp.TransportParam, "t", mcp.StdioTransportType, "sets transport to <stdio>")
 
 	mcpFlags.Bool(configuration.FLAG_EXPERIMENTAL, false, "enable experimental mcp command")
 	_ = mcpFlags.MarkDeprecated(configuration.FLAG_EXPERIMENTAL, "This is feature is in early access.")

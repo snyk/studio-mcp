@@ -17,8 +17,6 @@
 package mcp
 
 import (
-	"net/url"
-
 	"github.com/rs/zerolog"
 )
 
@@ -34,11 +32,5 @@ func WithLogger(logger *zerolog.Logger) Option {
 func WithCliPath(cliPath string) Option {
 	return func(server *McpLLMBinding) {
 		server.cliPath = cliPath
-	}
-}
-
-func WithBaseURL(baseURL *url.URL) func(server *McpLLMBinding) {
-	return func(server *McpLLMBinding) {
-		server.baseURL = baseURL
 	}
 }
