@@ -17,18 +17,13 @@ package mcp
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
-	"github.com/snyk/studio-mcp/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
@@ -42,22 +37,6 @@ func TestNewMcpServer(t *testing.T) {
 	mcpServer := NewMcpLLMBinding()
 	assert.NotNil(t, mcpServer)
 	assert.NotNil(t, mcpServer.logger)
-}
-
-func TestNewMcpServerWithOptions(t *testing.T) {
-	baseURL, _ := url.Parse("http://test:8080")
-
-	mcpServer := NewMcpLLMBinding(WithBaseURL(baseURL))
-
-	assert.Equal(t, baseURL, mcpServer.baseURL)
-}
-
-func TestDefaultURL(t *testing.T) {
-	u, err := networking.LoopbackURL()
-	assert.NoError(t, err)
-	assert.NotNil(t, u)
-	assert.Equal(t, "http", u.Scheme)
-	assert.Contains(t, u.Host, networking.DefaultHost)
 }
 
 func TestExpandedEnv(t *testing.T) {
@@ -191,80 +170,6 @@ func TestExpandedEnv(t *testing.T) {
 	})
 }
 
-func TestIsValidHttpRequest(t *testing.T) {
-	tests := []struct {
-		name     string
-		host     string
-		origin   string
-		expected bool
-	}{
-		{
-			name:     "valid request with localhost host",
-			host:     "localhost",
-			origin:   "",
-			expected: true,
-		},
-		{
-			name:     "valid request with localhost origin",
-			host:     "localhost",
-			origin:   "http://localhost:3000",
-			expected: true,
-		},
-		{
-			name:     "valid request with IPv4 loopback",
-			host:     "127.0.0.1",
-			origin:   "",
-			expected: true,
-		},
-		{
-			name:     "valid request with IPv6 loopback",
-			host:     "::1",
-			origin:   "",
-			expected: true,
-		},
-		{
-			name:     "invalid request with allowed host",
-			host:     "example.com",
-			origin:   "",
-			expected: false,
-		},
-		{
-			name:     "invalid request with disallowed origin",
-			host:     "localhost",
-			origin:   "http://example.com",
-			expected: false,
-		},
-		{
-			name:     "valid request with empty origin and host",
-			host:     "",
-			origin:   "",
-			expected: true,
-		},
-		{
-			name:     "valid host header with port",
-			host:     "localhost:3000",
-			origin:   "",
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &http.Request{
-				Header: make(http.Header),
-				Host:   tt.host,
-			}
-			r.Header.Set("Host", tt.host)
-			if tt.origin != "" {
-				r.Header.Set("Origin", tt.origin)
-			}
-
-			result := networking.IsValidLoopbackRequest(r)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestStarted(t *testing.T) {
 	t.Run("returns false when not started", func(t *testing.T) {
 		binding := NewMcpLLMBinding()
@@ -281,61 +186,22 @@ func TestStarted(t *testing.T) {
 }
 
 func TestShutdown(t *testing.T) {
-	t.Run("handles shutdown with no SSE server", func(t *testing.T) {
+	t.Run("marks the server as no longer started", func(t *testing.T) {
 		binding := NewMcpLLMBinding()
-		ctx := t.Context()
+		binding.mutex.Lock()
+		binding.started = true
+		binding.mutex.Unlock()
 
-		// Should not panic or error when no SSE server exists
-		binding.Shutdown(ctx)
-		assert.Nil(t, binding.sseServer)
+		binding.Shutdown(t.Context())
+
+		assert.False(t, binding.Started())
 	})
 
-	t.Run("handles shutdown with SSE server", func(t *testing.T) {
+	t.Run("is safe to call on a server that never started", func(t *testing.T) {
 		binding := NewMcpLLMBinding()
 
-		// Create a mock SSE server for testing
-		mcpServer := server.NewMCPServer("test", "1.0.0")
-		binding.sseServer = server.NewSSEServer(mcpServer)
-
-		ctx := t.Context()
-		binding.Shutdown(ctx)
-
-		// Verify the shutdown was attempted
-		assert.NotNil(t, binding.sseServer)
-	})
-}
-
-func TestMiddleware(t *testing.T) {
-	t.Run("allows valid localhost requests", func(t *testing.T) {
-		mcpServer := server.NewMCPServer("test", "1.0.0")
-		sseServer := server.NewSSEServer(mcpServer)
-		handler := middleware(sseServer)
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Host = "localhost"
-		req.Header.Set("Origin", "http://localhost:3000")
-
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-
-		// Should not return forbidden (would be handled by SSE server)
-		assert.NotEqual(t, http.StatusForbidden, rr.Code)
-	})
-
-	t.Run("blocks invalid external requests", func(t *testing.T) {
-		mcpServer := server.NewMCPServer("test", "1.0.0")
-		sseServer := server.NewSSEServer(mcpServer)
-		handler := middleware(sseServer)
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Host = "example.com"
-		req.Header.Set("Origin", "http://example.com")
-
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-
-		assert.Equal(t, http.StatusForbidden, rr.Code)
-		assert.Contains(t, rr.Body.String(), "Forbidden: Access restricted to localhost origins")
+		assert.NotPanics(t, func() { binding.Shutdown(t.Context()) })
+		assert.False(t, binding.Started())
 	})
 }
 
@@ -360,38 +226,6 @@ func TestHandleStdioServer(t *testing.T) {
 	})
 }
 
-func TestHandleSseServer(t *testing.T) {
-	t.Run("sets base URL when none provided", func(t *testing.T) {
-		binding := NewMcpLLMBinding()
-
-		// Mock the mcpServer
-		binding.mcpServer = server.NewMCPServer("test", "1.0.0")
-
-		// Test the initial part of HandleSseServer logic without actually starting the server
-		originalBaseURL := binding.baseURL
-		assert.Nil(t, originalBaseURL)
-
-		// Call would set the base URL if none was provided, but we can't test the full flow
-		// without starting an actual server, so we'll test the baseURL setting behavior separately
-		if binding.baseURL == nil {
-			defaultURL, err := networking.LoopbackURL()
-			require.NoError(t, err)
-			binding.baseURL = defaultURL
-		}
-
-		assert.NotNil(t, binding.baseURL)
-		assert.Equal(t, "http", binding.baseURL.Scheme)
-	})
-
-	t.Run("uses provided base URL", func(t *testing.T) {
-		testURL, _ := url.Parse("http://localhost:9999")
-		binding := NewMcpLLMBinding(WithBaseURL(testURL))
-
-		// Should use the provided URL
-		assert.Equal(t, testURL, binding.baseURL)
-	})
-}
-
 func TestStart(t *testing.T) {
 	t.Run("panics with nil invocation context", func(t *testing.T) {
 		binding := NewMcpLLMBinding()
@@ -401,6 +235,52 @@ func TestStart(t *testing.T) {
 			_ = binding.Start(nil)
 		})
 	})
+
+	// The SSE transport has been retired, so a client still configured with
+	// "-t sse" must fail fast with an actionable error rather than silently
+	// falling back to stdio.
+	t.Run("rejects the retired sse transport before any setup", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		engineConfig := configuration.NewWithOpts()
+		engineConfig.Set(TransportParam, "sse")
+
+		invocationCtx := mocks.NewMockInvocationContext(ctrl)
+		invocationCtx.EXPECT().GetConfiguration().Return(engineConfig).AnyTimes()
+
+		binding := NewMcpLLMBinding()
+		err := binding.Start(invocationCtx)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unsupported transport type "sse"`)
+		assert.Contains(t, err.Error(), "stdio")
+		assert.Nil(t, binding.mcpServer, "no server should be constructed for an unsupported transport")
+		assert.False(t, binding.Started())
+	})
+}
+
+func TestValidateTransport(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport string
+		expectErr bool
+	}{
+		{name: "stdio is supported", transport: "stdio", expectErr: false},
+		{name: "unset falls back to stdio", transport: "", expectErr: false},
+		{name: "sse is retired", transport: "sse", expectErr: true},
+		{name: "unknown transport is rejected", transport: "websocket", expectErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateTransport(tt.transport)
+			if tt.expectErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.transport)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 // TestMintCorrelationID covers the "Session-scoped correlation ID on feedback

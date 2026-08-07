@@ -217,7 +217,7 @@ Use descriptive names that explain the scenario being tested:
 ```go
 t.Run("valid request with localhost host", func(t *testing.T) { ... })
 t.Run("returns error when org ID is missing", func(t *testing.T) { ... })
-t.Run("handles shutdown with no SSE server", func(t *testing.T) { ... })
+t.Run("is safe to call on a server that never started", func(t *testing.T) { ... })
 ```
 
 ---
@@ -677,11 +677,11 @@ func createMockAPIServer(t *testing.T, statusCode int, response map[string]inter
 ### Testing HTTP Handlers
 
 ```go
-func TestMiddleware(t *testing.T) {
+func TestLoopbackGuard(t *testing.T) {
     t.Run("allows valid localhost requests", func(t *testing.T) {
-        mcpServer := server.NewMCPServer("test", "1.0.0")
-        sseServer := server.NewSSEServer(mcpServer)
-        handler := middleware(sseServer)
+        handler := loopbackGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+            w.WriteHeader(http.StatusOK)
+        }))
 
         req := httptest.NewRequest(http.MethodGet, "/", nil)
         req.Host = "localhost"
