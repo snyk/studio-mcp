@@ -583,7 +583,7 @@
         "test"
       ],
       "ignoreTrust": true,
-      "profiles": ["experimental"],
+      "profiles": ["full", "experimental"],
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
