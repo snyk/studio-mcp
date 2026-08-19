@@ -2411,7 +2411,7 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 			},
 		},
 		{
-			name:    "full profile excludes experimental tools",
+			name:    "full profile registers all non-lite tools",
 			profile: ProfileFull,
 			expectedTools: []string{
 				"snyk_auth",
@@ -2426,11 +2426,10 @@ func TestAddSnykToolsWithProfile(t *testing.T) {
 				"snyk_sbom_scan",
 				"snyk_aibom",
 				"snyk_package_health_check",
+				"snyk_secret_scan",
 				"snyk_breakability_check",
 			},
-			unexpectedTools: []string{
-				"snyk_secret_scan",
-			},
+			unexpectedTools: []string{},
 		},
 		{
 			name:    "experimental profile includes all tools",
@@ -2536,21 +2535,12 @@ func TestToolProfileAssignmentsInJson(t *testing.T) {
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 
-			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom", "snyk_package_health_check", "snyk_breakability_check":
+			case "snyk_container_scan", "snyk_iac_scan", "snyk_sbom_scan", "snyk_aibom", "snyk_package_health_check", "snyk_secret_scan", "snyk_breakability_check":
 				// These should be in full but not lite
 				require.False(t, IsToolInProfile(tool, ProfileLite),
 					"Tool %s should NOT be in lite profile", tool.Name)
 				require.True(t, IsToolInProfile(tool, ProfileFull),
 					"Tool %s should be in full profile", tool.Name)
-				require.True(t, IsToolInProfile(tool, ProfileExperimental),
-					"Tool %s should be in experimental profile", tool.Name)
-
-			case "snyk_secret_scan":
-				// These should be experimental only
-				require.False(t, IsToolInProfile(tool, ProfileLite),
-					"Tool %s should NOT be in lite profile", tool.Name)
-				require.False(t, IsToolInProfile(tool, ProfileFull),
-					"Tool %s should NOT be in full profile", tool.Name)
 				require.True(t, IsToolInProfile(tool, ProfileExperimental),
 					"Tool %s should be in experimental profile", tool.Name)
 			}
