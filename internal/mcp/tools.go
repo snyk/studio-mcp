@@ -447,7 +447,16 @@ func (m *McpLLMBinding) snykAuthHandler(invocationCtx workflow.InvocationContext
 			return mcp.NewToolResultText(msg), nil
 		}
 
-		if err != nil && os.Getenv("SNYK_TOKEN") != "" {
+		// CallWhoAmI returns a user or an error, so err is set from here on.
+		// The auth workflow deletes the stored credentials before it opens the
+		// browser. Only start it when Snyk actually refused them: a whoami that
+		// never reached a verdict says nothing about the credentials.
+		if !authentication.IsAuthError(err) {
+			logger.Warn().Err(err).Msg("Could not verify authentication; leaving the existing credentials in place")
+			return mcp.NewToolResultText(fmt.Sprintf("Could not verify Snyk authentication, so the existing credentials were left in place. Try again once Snyk is reachable; if it is reachable and this persists, run snyk_logout and then snyk_auth. Cause: %v", err)), nil
+		}
+
+		if os.Getenv("SNYK_TOKEN") != "" {
 			logger.Error().Msg("Auth tool can't be called if SNYK_TOKEN env var is set")
 			return mcp.NewToolResultText("Authentication aborted. Auth tool can't be called if SNYK_TOKEN env var is set"), nil
 		}

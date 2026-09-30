@@ -19,9 +19,13 @@ package authentication
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/snyk/error-catalog-golang-public/errorcodes"
+	"github.com/snyk/error-catalog-golang-public/snyk_errors"
+	"github.com/snyk/go-application-framework/pkg/networking/middleware"
 	"github.com/snyk/go-application-framework/pkg/workflow"
 
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -78,4 +82,25 @@ func CallWhoAmI(logger *zerolog.Logger, engine workflow.Engine) (*ActiveUser, er
 	}
 
 	return &user, nil
+}
+
+// IsAuthError reports whether err means Snyk refused the credentials (or there
+// were none), as opposed to giving no verdict at all: a network failure, a
+// timeout, a 5xx. GAF's response middleware turns a 401 into the error
+// catalog's Unauthorised error, so this checks that type, not the message.
+//
+// It does not match on "auth" in the message: every failed OAuth refresh,
+// network failures included, carries GAF's "authentication failed".
+func IsAuthError(err error) bool {
+	var snykErr snyk_errors.Error
+	if !errors.As(err, &snykErr) {
+		return false
+	}
+	if snykErr.ErrorCode == errorcodes.Snyk.UnauthorisedError || snykErr.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	// An expired or revoked OAuth refresh token: Snyk's token endpoint answers
+	// 400 invalid_grant, which reaches here as a BadRequest joined with GAF's
+	// ErrAuthenticationFailed rather than as Unauthorised.
+	return snykErr.StatusCode == http.StatusBadRequest && errors.Is(err, middleware.ErrAuthenticationFailed)
 }
