@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,7 @@ import (
 	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/require"
 
+	"github.com/snyk/error-catalog-golang-public/snyk"
 	"github.com/snyk/go-application-framework/pkg/configuration"
 	localworkflows "github.com/snyk/go-application-framework/pkg/local_workflows"
 	"github.com/snyk/go-application-framework/pkg/mocks"
@@ -745,6 +747,103 @@ func TestAuthHandler(t *testing.T) {
 	textContent, ok := result.Content[0].(mcp.TextContent)
 	require.True(t, ok)
 	require.Equal(t, mockAuthResponse, strings.TrimSpace(textContent.Text))
+}
+
+// setupSnykAuthHandlerTest wires a mock engine whose whoami returns whoamiErr
+// (or a user, when nil), and asserts how many times the auth workflow runs.
+func setupSnykAuthHandlerTest(t *testing.T, whoamiErr error, authRuns int) (*McpLLMBinding, *mocks.MockInvocationContext) {
+	t.Helper()
+	engine, engineConfig := SetupEngineMock(t)
+	logger := zerolog.New(io.Discard)
+	mockctl := gomock.NewController(t)
+
+	invocationCtx := mocks.NewMockInvocationContext(mockctl)
+	invocationCtx.EXPECT().GetConfiguration().Return(engineConfig).AnyTimes()
+	invocationCtx.EXPECT().GetEngine().Return(engine).AnyTimes()
+
+	var whoamiData []workflow.Data
+	if whoamiErr == nil {
+		_, whoamiData = whoamiWorkflowResponse(t)
+	}
+	engine.EXPECT().InvokeWithConfig(localworkflows.WORKFLOWID_WHOAMI, gomock.Any()).Return(whoamiData, whoamiErr).AnyTimes()
+	engine.EXPECT().InvokeWithConfig(localworkflows.WORKFLOWID_AUTH, gomock.Any()).Return(nil, nil).Times(authRuns)
+
+	return NewMcpLLMBinding(WithLogger(&logger)), invocationCtx
+}
+
+// The auth workflow deletes the stored credentials before it opens the
+// browser, so snyk_auth must only start it when Snyk actually rejected the
+// credentials. A whoami that got no verdict at all (network down, a 5xx) says
+// nothing about them, and must leave them where they are.
+func TestSnykAuthHandler(t *testing.T) {
+	// How whoami errors are wrapped is covered by TestIsAuthError; here only the
+	// classification matters.
+	unauthorised := snyk.NewUnauthorisedError("Use `snyk auth` to authenticate.")
+	networkDown := errors.New("dial tcp: connect: network is unreachable")
+	serverError := snyk.NewServerError("Internal server error.")
+
+	testCases := []struct {
+		name         string
+		whoamiErr    error
+		snykTokenEnv string
+		authRuns     int
+		expectedText string
+	}{
+		{
+			name:         "already authenticated does not start the auth workflow",
+			whoamiErr:    nil,
+			authRuns:     0,
+			expectedText: "Already Authenticated",
+		},
+		{
+			name:         "rejected credentials start the auth workflow",
+			whoamiErr:    unauthorised,
+			authRuns:     1,
+			expectedText: "Successfully logged in",
+		},
+		{
+			name:         "network failure leaves the credentials in place",
+			whoamiErr:    networkDown,
+			authRuns:     0,
+			expectedText: "existing credentials were left in place",
+		},
+		{
+			name:         "server error leaves the credentials in place",
+			whoamiErr:    serverError,
+			authRuns:     0,
+			expectedText: "existing credentials were left in place",
+		},
+		{
+			name:         "network failure with SNYK_TOKEN set reports the network failure",
+			whoamiErr:    networkDown,
+			snykTokenEnv: "a-token",
+			authRuns:     0,
+			expectedText: "existing credentials were left in place",
+		},
+		{
+			name:         "rejected credentials with SNYK_TOKEN set abort",
+			whoamiErr:    unauthorised,
+			snykTokenEnv: "a-token",
+			authRuns:     0,
+			expectedText: "Authentication aborted",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SNYK_TOKEN", tc.snykTokenEnv)
+			binding, invocationCtx := setupSnykAuthHandlerTest(t, tc.whoamiErr, tc.authRuns)
+
+			handler := binding.snykAuthHandler(invocationCtx, SnykMcpToolsDefinition{Name: ToolName.Auth})
+			result, err := handler(t.Context(), mcp.CallToolRequest{})
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			text, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			require.Contains(t, text.Text, tc.expectedText)
+		})
+	}
 }
 
 func TestGetSnykToolsConfig(t *testing.T) {
