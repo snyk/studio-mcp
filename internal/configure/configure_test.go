@@ -8,43 +8,138 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
+	"github.com/golang/mock/gomock"
 	"github.com/rs/zerolog"
+	"github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/go-application-framework/pkg/mocks"
 	"github.com/snyk/studio-mcp/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpsertDelimitedBlock(t *testing.T) {
-	tests := []struct {
-		name     string
-		source   string
-		expected string
-	}{
-		{
-			name:     "empty source",
-			source:   "",
-			expected: RuleStart + "\ntest content\n" + RuleEnd + "\n",
-		},
-		{
-			name:     "source without markers",
-			source:   "existing content\n",
-			expected: "existing content\n\n" + RuleStart + "\ntest content\n" + RuleEnd + "\n",
-		},
-		{
-			name:     "source with markers",
-			source:   "before\n" + RuleStart + "\nold content\n" + RuleEnd + "\nafter\n",
-			expected: "before\n" + RuleStart + "\ntest content\n" + RuleEnd + "\nafter\n",
-		},
+func TestConfigure(t *testing.T) {
+	nopLogger := zerolog.New(io.Discard)
+	logger := &nopLogger
+
+	// Snyk entry as the IDE CLI wrote it: a "/snyk-" binary running "mcp -t stdio".
+	snykMcpConfig := `{"mcpServers":{"Snyk":{"command":"/data/snyk/vscode-cli/snyk-macos-arm64","args":["mcp","-t","stdio"]},"Other":{"command":"other"}}}`
+	rulesContent := "# My rules\n\n" + RuleStart + "\n# Snyk Rules\n" + RuleEnd + "\n"
+
+	newUi := func(t *testing.T) *mocks.MockUserInterface {
+		t.Helper()
+		userInterface := mocks.NewMockUserInterface(gomock.NewController(t))
+		userInterface.EXPECT().Output(gomock.Any()).AnyTimes()
+		return userInterface
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			block := RuleStart + "\ntest content\n" + RuleEnd + "\n"
-			result := upsertDelimitedBlock(tt.source, RuleStart, RuleEnd, block)
-			assert.Equal(t, tt.expected, result)
-		})
+	// setUpWindsurf points the home directory at a temp dir and writes the
+	// artifacts an older IDE extension left for Windsurf.
+	setUpWindsurf := func(t *testing.T) (mcpPath, globalRulesPath, workspace, legacyRulesPath string) {
+		t.Helper()
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+
+		windsurfDir := filepath.Join(home, ".codeium", "windsurf")
+		mcpPath = filepath.Join(windsurfDir, "mcp_config.json")
+		globalRulesPath = filepath.Join(windsurfDir, "memories", "global_rules.md")
+		workspace = t.TempDir()
+		legacyRulesPath = filepath.Join(workspace, ".windsurf", "rules", "snyk_rules.md")
+
+		for path, content := range map[string]string{
+			mcpPath:         snykMcpConfig,
+			globalRulesPath: rulesContent,
+			legacyRulesPath: "# Snyk Rules",
+		} {
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+		}
+		return mcpPath, globalRulesPath, workspace, legacyRulesPath
 	}
+
+	readMcpServers := func(t *testing.T, path string) map[string]interface{} {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		var config map[string]interface{}
+		require.NoError(t, json.Unmarshal(data, &config))
+		servers, ok := config["mcpServers"].(map[string]interface{})
+		require.True(t, ok)
+		return servers
+	}
+
+	t.Run("rejects calls without --rm and writes nothing", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+
+		config := configuration.NewWithOpts()
+		config.Set(shared.ToolNameParam, "cursor")
+		config.Set(shared.ConfigureMcpParam, true)
+		config.Set(shared.ConfigureRulesParam, true)
+
+		err := Configure(logger, config, newUi(t))
+
+		assert.ErrorIs(t, err, ErrConfigureRemoved)
+		entries, err := os.ReadDir(home)
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+	})
+
+	t.Run("removes rules and keeps MCP when configure-mcp is false", func(t *testing.T) {
+		// The legacy rules cleanup `snyk studio install` runs.
+		mcpPath, globalRulesPath, workspace, legacyRulesPath := setUpWindsurf(t)
+
+		config := configuration.NewWithOpts()
+		config.Set(shared.ToolNameParam, "windsurf")
+		config.Set(shared.RemoveParam, true)
+		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
+		config.Set(shared.WorkspacePathParam, workspace)
+		config.Set(shared.ConfigureMcpParam, false)
+		config.Set(shared.ConfigureRulesParam, true)
+
+		err := Configure(logger, config, newUi(t))
+		require.NoError(t, err)
+
+		rules, err := os.ReadFile(globalRulesPath)
+		require.NoError(t, err)
+		assert.Equal(t, "# My rules\n", string(rules))
+		assert.NoFileExists(t, legacyRulesPath)
+		assert.Contains(t, readMcpServers(t, mcpPath), shared.ServerNameKey)
+	})
+
+	t.Run("removes MCP and keeps rules when configure-rules is false", func(t *testing.T) {
+		mcpPath, globalRulesPath, workspace, legacyRulesPath := setUpWindsurf(t)
+
+		config := configuration.NewWithOpts()
+		config.Set(shared.ToolNameParam, "windsurf")
+		config.Set(shared.RemoveParam, true)
+		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
+		config.Set(shared.WorkspacePathParam, workspace)
+		config.Set(shared.ConfigureMcpParam, true)
+		config.Set(shared.ConfigureRulesParam, false)
+
+		err := Configure(logger, config, newUi(t))
+		require.NoError(t, err)
+
+		servers := readMcpServers(t, mcpPath)
+		assert.NotContains(t, servers, shared.ServerNameKey)
+		assert.Contains(t, servers, "Other")
+		rules, err := os.ReadFile(globalRulesPath)
+		require.NoError(t, err)
+		assert.Equal(t, rulesContent, string(rules))
+		assert.FileExists(t, legacyRulesPath)
+	})
+
+	t.Run("returns an error for an unsupported tool", func(t *testing.T) {
+		config := configuration.NewWithOpts()
+		config.Set(shared.ToolNameParam, "unsupported")
+		config.Set(shared.RemoveParam, true)
+
+		err := Configure(logger, config, newUi(t))
+
+		assert.ErrorContains(t, err, "unsupported Tool")
+	})
 }
 
 func TestGetHostConfig(t *testing.T) {
@@ -57,7 +152,6 @@ func TestGetHostConfig(t *testing.T) {
 		expectError                bool
 		expectedName               string
 		expectMcpGlobalConfig      bool
-		expectLocalRulesPath       bool
 		expectGlobalRulesPath      bool
 		expectGlobalSkillsPath     bool
 		expectLegacyLocalRulesPath bool
@@ -141,9 +235,6 @@ func TestGetHostConfig(t *testing.T) {
 				assert.NotEmpty(t, config.mcpGlobalConfigPath)
 				assert.Contains(t, config.mcpGlobalConfigPath, homeDir)
 			}
-			if tt.expectLocalRulesPath {
-				assert.NotEmpty(t, config.localRulesPath)
-			}
 			if tt.expectGlobalRulesPath {
 				assert.NotEmpty(t, config.globalRulesPath)
 				assert.Contains(t, config.globalRulesPath, homeDir)
@@ -202,9 +293,6 @@ func TestGetHostConfig_VSCodePaths(t *testing.T) {
 			assert.Equal(t, filepath.Join(tt.expectedGlobalRulesDir, tt.expectedGlobalRulesFilename), config.globalRulesPath)
 			assert.Contains(t, config.globalRulesPath, configDir)
 
-			// Verify no local rules path (migrated to global)
-			assert.Empty(t, config.localRulesPath)
-
 			// Verify legacy local rules path for cleanup
 			assert.Equal(t, tt.expectedLegacyLocalPath, config.legacyLocalRulesPath)
 
@@ -213,472 +301,6 @@ func TestGetHostConfig_VSCodePaths(t *testing.T) {
 
 			// Verify no skills path (VS Code uses rules, not skills)
 			assert.Empty(t, config.globalSkillsPath)
-		})
-	}
-}
-
-func TestEnsureMcpServerInJson(t *testing.T) {
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "mcp.json")
-
-	env := shared.McpEnvMap{
-		"SNYK_CFG_ORG": "test-org",
-		"SNYK_API":     "https://api.snyk.io",
-	}
-
-	// Create a logger that discards output
-	nopLogger := zerolog.New(io.Discard)
-	logger := &nopLogger
-
-	t.Run("creates new config", func(t *testing.T) {
-		err := ensureMcpServerInJson(configPath, "Snyk", "/path/to/cli", []string{"mcp", "-t", "stdio"}, env, logger)
-		require.NoError(t, err)
-
-		// Verify file was created
-		assert.FileExists(t, configPath)
-
-		// Verify content
-		data, err := os.ReadFile(configPath)
-		require.NoError(t, err)
-
-		var config McpConfig
-		err = json.Unmarshal(data, &config)
-		require.NoError(t, err)
-
-		assert.Contains(t, config.McpServers, "Snyk")
-		server := config.McpServers["Snyk"]
-		assert.Equal(t, "/path/to/cli", server.Command)
-		assert.Equal(t, []string{"mcp", "-t", "stdio"}, server.Args)
-		assert.Equal(t, "test-org", server.Env["SNYK_CFG_ORG"])
-	})
-
-	t.Run("updates existing config", func(t *testing.T) {
-		newEnv := shared.McpEnvMap{
-			"SNYK_CFG_ORG": "updated-org",
-			"SNYK_API":     "https://api.snyk.io",
-		}
-
-		err := ensureMcpServerInJson(configPath, "Snyk", "/new/path/to/cli", []string{"mcp", "-t", "stdio"}, newEnv, logger)
-		require.NoError(t, err)
-
-		// Verify updated content
-		data, err := os.ReadFile(configPath)
-		require.NoError(t, err)
-
-		var config McpConfig
-		err = json.Unmarshal(data, &config)
-		require.NoError(t, err)
-
-		server := config.McpServers["Snyk"]
-		assert.Equal(t, "/new/path/to/cli", server.Command)
-		assert.Equal(t, "updated-org", server.Env["SNYK_CFG_ORG"])
-	})
-
-	t.Run("preserves other servers", func(t *testing.T) {
-		// Add another server manually
-		data, err := os.ReadFile(configPath)
-		require.NoError(t, err)
-
-		var config McpConfig
-		err = json.Unmarshal(data, &config)
-		require.NoError(t, err)
-
-		config.McpServers["OtherServer"] = McpServer{
-			Command: "/other/cli",
-			Args:    []string{"arg1"},
-			Env:     shared.McpEnvMap{"KEY": "value"},
-		}
-
-		data, err = json.MarshalIndent(config, "", "  ")
-		require.NoError(t, err)
-		err = os.WriteFile(configPath, data, 0644)
-		require.NoError(t, err)
-
-		// Update Snyk server
-		err = ensureMcpServerInJson(configPath, "Snyk", "/path/to/cli", []string{"mcp", "-t", "stdio"}, env, logger)
-		require.NoError(t, err)
-
-		// Verify both servers exist
-		data, err = os.ReadFile(configPath)
-		require.NoError(t, err)
-		err = json.Unmarshal(data, &config)
-		require.NoError(t, err)
-
-		assert.Contains(t, config.McpServers, "Snyk")
-		assert.Contains(t, config.McpServers, "OtherServer")
-		assert.Equal(t, "/other/cli", config.McpServers["OtherServer"].Command)
-	})
-
-	t.Run("coexists with SnykAlphaPatch by identifying SAI server by command and args", func(t *testing.T) {
-		isolatedPath := filepath.Join(t.TempDir(), "mcp.json")
-		alphaPatch := McpServer{
-			Command: "npx",
-			Args:    []string{"-y", "@example/alphapatch-mcp"},
-			Env:     shared.McpEnvMap{"ALPHA": "keep"},
-		}
-		cfg := McpConfig{
-			McpServers: map[string]McpServer{
-				"SnykAlphaPatch": alphaPatch,
-			},
-		}
-		data, err := json.MarshalIndent(cfg, "", "  ")
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(isolatedPath, data, 0644))
-
-		snykCliCommand := "/path/to/snyk-cli"
-		err = ensureMcpServerInJson(isolatedPath, "Snyk", snykCliCommand, []string{"mcp", "-t", "stdio"}, env, logger)
-		require.NoError(t, err)
-
-		out, err := os.ReadFile(isolatedPath)
-		require.NoError(t, err)
-		var parsed McpConfig
-		require.NoError(t, json.Unmarshal(out, &parsed))
-
-		assert.Equal(t, alphaPatch, parsed.McpServers["SnykAlphaPatch"], "SnykAlphaPatch entry must not be modified")
-		require.Contains(t, parsed.McpServers, "Snyk")
-		assert.Equal(t, snykCliCommand, parsed.McpServers["Snyk"].Command)
-		assert.Equal(t, []string{"mcp", "-t", "stdio"}, parsed.McpServers["Snyk"].Args)
-	})
-
-	t.Run("updates existing SAI MCP server by matching command and args", func(t *testing.T) {
-		isolatedPath := filepath.Join(t.TempDir(), "mcp.json")
-		snykCommand := "/path/to/snyk-cli"
-		cfg := McpConfig{
-			McpServers: map[string]McpServer{
-				"OldSnykName": McpServer{
-					Command: snykCommand,
-					Args:    []string{"mcp", "-t", "stdio"},
-					Env:     shared.McpEnvMap{"SNYK_CFG_ORG": "old-org"},
-				},
-			},
-		}
-		data, err := json.MarshalIndent(cfg, "", "  ")
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(isolatedPath, data, 0644))
-
-		newEnv := shared.McpEnvMap{"SNYK_CFG_ORG": "new-org"}
-		err = ensureMcpServerInJson(isolatedPath, "Snyk", snykCommand, []string{"mcp", "-t", "stdio"}, newEnv, logger)
-		require.NoError(t, err)
-
-		out, err := os.ReadFile(isolatedPath)
-		require.NoError(t, err)
-		var parsed McpConfig
-		require.NoError(t, json.Unmarshal(out, &parsed))
-
-		require.Contains(t, parsed.McpServers, "OldSnykName")
-		assert.Equal(t, snykCommand, parsed.McpServers["OldSnykName"].Command)
-		assert.Equal(t, []string{"mcp", "-t", "stdio"}, parsed.McpServers["OldSnykName"].Args)
-	})
-
-	t.Run("preserves other root-level JSON fields", func(t *testing.T) {
-		// Create a config file with additional root-level fields
-		configWithOtherFields := map[string]interface{}{
-			"customField": "customValue",
-			"settings": map[string]interface{}{
-				"enabled": true,
-				"timeout": 5000,
-			},
-			"mcpServers": map[string]interface{}{
-				"Snyk": map[string]interface{}{
-					"command": "/path/to/cli",
-					"args":    []string{"mcp", "-t", "stdio"},
-					"env": map[string]interface{}{
-						"SNYK_CFG_ORG": "test-org",
-					},
-				},
-			},
-		}
-
-		data, err := json.MarshalIndent(configWithOtherFields, "", "  ")
-		require.NoError(t, err)
-		err = os.WriteFile(configPath, data, 0644)
-		require.NoError(t, err)
-
-		// Update Snyk server
-		newEnv := shared.McpEnvMap{"SNYK_CFG_ORG": "updated-org"}
-		err = ensureMcpServerInJson(configPath, "Snyk", "/updated/path", []string{"mcp", "-t", "stdio"}, newEnv, logger)
-		require.NoError(t, err)
-
-		// Read and verify all fields are preserved
-		data, err = os.ReadFile(configPath)
-		require.NoError(t, err)
-
-		var genericConfig map[string]interface{}
-		err = json.Unmarshal(data, &genericConfig)
-		require.NoError(t, err)
-
-		// Verify custom fields are preserved
-		assert.Equal(t, "customValue", genericConfig["customField"])
-		assert.NotNil(t, genericConfig["settings"])
-		settings := genericConfig["settings"].(map[string]interface{})
-		assert.Equal(t, true, settings["enabled"])
-		assert.Equal(t, float64(5000), settings["timeout"])
-
-		// Verify mcpServers was updated correctly
-		assert.NotNil(t, genericConfig["mcpServers"])
-		mcpServers := genericConfig["mcpServers"].(map[string]interface{})
-		assert.Contains(t, mcpServers, "Snyk")
-
-		snykServer := mcpServers["Snyk"].(map[string]interface{})
-		assert.Equal(t, "/updated/path", snykServer["command"])
-	})
-
-	t.Run("preserves additional server properties", func(t *testing.T) {
-		// Create a config with additional properties on the server
-		configWithServerProps := map[string]interface{}{
-			"mcpServers": map[string]interface{}{
-				"Snyk": map[string]interface{}{
-					"command": "/path/to/cli",
-					"args":    []interface{}{"mcp", "-t", "stdio"},
-					"env": map[string]interface{}{
-						"SNYK_CFG_ORG": "test-org",
-					},
-					// Additional properties that should be preserved
-					"customProperty": "customValue",
-					"metadata": map[string]interface{}{
-						"version": "1.0.0",
-						"author":  "test",
-					},
-					"enabled": true,
-					"timeout": 5000,
-				},
-			},
-		}
-
-		data, err := json.MarshalIndent(configWithServerProps, "", "  ")
-		require.NoError(t, err)
-		err = os.WriteFile(configPath, data, 0644)
-		require.NoError(t, err)
-
-		// Update only command and env
-		newEnv := shared.McpEnvMap{"SNYK_CFG_ORG": "updated-org", "SNYK_API": "https://api.snyk.io"}
-		err = ensureMcpServerInJson(configPath, "Snyk", "/updated/cli", []string{"mcp", "-t", "stdio"}, newEnv, logger)
-		require.NoError(t, err)
-
-		// Read and verify all server properties are preserved
-		data, err = os.ReadFile(configPath)
-		require.NoError(t, err)
-
-		var genericConfig map[string]interface{}
-		err = json.Unmarshal(data, &genericConfig)
-		require.NoError(t, err)
-
-		mcpServers := genericConfig["mcpServers"].(map[string]interface{})
-		snykServer := mcpServers["Snyk"].(map[string]interface{})
-
-		// Verify updated fields
-		assert.Equal(t, "/updated/cli", snykServer["command"])
-		assert.Equal(t, []interface{}{"mcp", "-t", "stdio"}, snykServer["args"])
-
-		serverEnv := snykServer["env"].(map[string]interface{})
-		assert.Equal(t, "updated-org", serverEnv["SNYK_CFG_ORG"])
-		assert.Equal(t, "https://api.snyk.io", serverEnv["SNYK_API"])
-
-		// Verify preserved custom properties
-		assert.Equal(t, "customValue", snykServer["customProperty"])
-		assert.Equal(t, true, snykServer["enabled"])
-		assert.Equal(t, float64(5000), snykServer["timeout"])
-
-		metadata := snykServer["metadata"].(map[string]interface{})
-		assert.Equal(t, "1.0.0", metadata["version"])
-		assert.Equal(t, "test", metadata["author"])
-	})
-}
-
-func TestWriteLocalRules(t *testing.T) {
-	tempGitRoot := t.TempDir()
-	_, err := git.PlainInit(tempGitRoot, false)
-	require.NoError(t, err)
-
-	err = os.WriteFile(filepath.Join(tempGitRoot, ".gitignore"), []byte("Thumbs.db\n.DS_Store\n"), 0644)
-	require.NoError(t, err)
-
-	nopLogger := zerolog.New(io.Discard)
-	logger := &nopLogger
-	rulesContent := "# Test Rules\nRule 1\nRule 2"
-
-	t.Run("creates local rules file", func(t *testing.T) {
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-
-		// Make sure 'relativeRulesPath' is not in the root .gitignore
-		gitIgnorePath := filepath.Join(tempGitRoot, ".gitignore")
-		assert.FileExists(t, gitIgnorePath)
-		gitIgnoreContent, err := os.ReadFile(gitIgnorePath)
-		require.NoError(t, err)
-		assert.NotContains(t, string(gitIgnoreContent), relativeRulesPath)
-
-		// Write local rules
-		err = writeLocalRules(tempGitRoot, relativeRulesPath, rulesContent, logger)
-		require.NoError(t, err)
-
-		err = gitIgnoreLocalRulesFile(tempGitRoot, relativeRulesPath, logger)
-		require.NoError(t, err)
-
-		// Verify that local rules were written
-		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
-		assert.FileExists(t, fullPath)
-		content, err := os.ReadFile(fullPath)
-		require.NoError(t, err)
-		assert.Equal(t, rulesContent, string(content))
-
-		// Verify that local rules were added to root .gitignore
-		gitIgnoreContent, err = os.ReadFile(gitIgnorePath)
-		require.NoError(t, err)
-		assert.Contains(t, string(gitIgnoreContent), relativeRulesPath)
-	})
-
-	t.Run("skips if content unchanged", func(t *testing.T) {
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		err := writeLocalRules(tempGitRoot, relativeRulesPath, rulesContent, logger)
-		require.NoError(t, err)
-
-		// Should not error - content already exists
-		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
-		content, err := os.ReadFile(fullPath)
-		require.NoError(t, err)
-		assert.Equal(t, rulesContent, string(content))
-	})
-}
-
-func TestWriteGlobalRules(t *testing.T) {
-	tempDir := t.TempDir()
-	targetFile := filepath.Join(tempDir, "global_rules.md")
-	nopLogger := zerolog.New(io.Discard)
-	logger := &nopLogger
-	rulesContent := "# Global Rules\nRule 1"
-
-	t.Run("creates global rules file with delimiters", func(t *testing.T) {
-		err := writeGlobalRules(targetFile, rulesContent, logger)
-		require.NoError(t, err)
-
-		assert.FileExists(t, targetFile)
-
-		content, err := os.ReadFile(targetFile)
-		require.NoError(t, err)
-		contentStr := string(content)
-
-		assert.Contains(t, contentStr, RuleStart)
-		assert.Contains(t, contentStr, RuleEnd)
-		assert.Contains(t, contentStr, rulesContent)
-	})
-
-	t.Run("updates existing global rules", func(t *testing.T) {
-		// Write initial content
-		initial := "Some existing content\n"
-		err := os.WriteFile(targetFile, []byte(initial), 0644)
-		require.NoError(t, err)
-
-		err = writeGlobalRules(targetFile, rulesContent, logger)
-		require.NoError(t, err)
-
-		content, err := os.ReadFile(targetFile)
-		require.NoError(t, err)
-		contentStr := string(content)
-
-		assert.Contains(t, contentStr, "Some existing content")
-		assert.Contains(t, contentStr, RuleStart)
-		assert.Contains(t, contentStr, rulesContent)
-	})
-
-	t.Run("replaces existing delimited block", func(t *testing.T) {
-		// Write content with existing delimited block
-		existing := "Before\n" + RuleStart + "\nOld rules\n" + RuleEnd + "\nAfter\n"
-		err := os.WriteFile(targetFile, []byte(existing), 0644)
-		require.NoError(t, err)
-
-		newRules := "# New Rules\nUpdated content"
-		err = writeGlobalRules(targetFile, newRules, logger)
-		require.NoError(t, err)
-
-		content, err := os.ReadFile(targetFile)
-		require.NoError(t, err)
-		contentStr := string(content)
-
-		assert.Contains(t, contentStr, "Before")
-		assert.Contains(t, contentStr, "After")
-		assert.Contains(t, contentStr, newRules)
-		assert.NotContains(t, contentStr, "Old rules")
-	})
-}
-
-func TestStringSlicesEqual(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        []string
-		b        []string
-		expected bool
-	}{
-		{
-			name:     "equal slices",
-			a:        []string{"a", "b", "c"},
-			b:        []string{"a", "b", "c"},
-			expected: true,
-		},
-		{
-			name:     "different length",
-			a:        []string{"a", "b"},
-			b:        []string{"a", "b", "c"},
-			expected: false,
-		},
-		{
-			name:     "different content",
-			a:        []string{"a", "b", "c"},
-			b:        []string{"a", "x", "c"},
-			expected: false,
-		},
-		{
-			name:     "both empty",
-			a:        []string{},
-			b:        []string{},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := stringSlicesEqual(tt.a, tt.b)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestEnvMapsEqual(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        shared.McpEnvMap
-		b        shared.McpEnvMap
-		expected bool
-	}{
-		{
-			name:     "equal maps",
-			a:        shared.McpEnvMap{"key1": "val1", "key2": "val2"},
-			b:        shared.McpEnvMap{"key1": "val1", "key2": "val2"},
-			expected: true,
-		},
-		{
-			name:     "different values",
-			a:        shared.McpEnvMap{"key1": "val1", "key2": "val2"},
-			b:        shared.McpEnvMap{"key1": "val1", "key2": "different"},
-			expected: false,
-		},
-		{
-			name:     "different keys",
-			a:        shared.McpEnvMap{"key1": "val1"},
-			b:        shared.McpEnvMap{"key2": "val1"},
-			expected: false,
-		},
-		{
-			name:     "both empty",
-			a:        shared.McpEnvMap{},
-			b:        shared.McpEnvMap{},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := envMapsEqual(tt.a, tt.b)
-			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -1029,152 +651,6 @@ func TestRemoveGlobalRules(t *testing.T) {
 		result, err := os.ReadFile(targetFile)
 		require.NoError(t, err)
 		assert.Equal(t, content, string(result))
-	})
-}
-
-func TestGitIgnoreLocalRulesFile(t *testing.T) {
-	nopLogger := zerolog.Nop()
-	logger := &nopLogger
-
-	t.Run("adds gitignore entry for file detected by git", func(t *testing.T) {
-		tempGitRoot := t.TempDir()
-		_, err := git.PlainInit(tempGitRoot, false)
-		require.NoError(t, err)
-
-		// Create .gitignore file
-		gitIgnorePath := filepath.Join(tempGitRoot, ".gitignore")
-		err = os.WriteFile(gitIgnorePath, []byte("# Initial gitignore\n"), 0644)
-		require.NoError(t, err)
-
-		// Create a rules file using OS-native path separator (filepath.Join)
-		// On Windows this will use backslashes, on Linux forward slashes
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
-		err = os.MkdirAll(filepath.Dir(fullPath), 0755)
-		require.NoError(t, err)
-		err = os.WriteFile(fullPath, []byte("# Test Rules"), 0644)
-		require.NoError(t, err)
-
-		// Call gitIgnoreLocalRulesFile
-		err = gitIgnoreLocalRulesFile(tempGitRoot, relativeRulesPath, logger)
-		require.NoError(t, err)
-
-		// Verify gitignore was updated with forward slashes (normalized for gitignore compatibility)
-		gitIgnoreContent, err := os.ReadFile(gitIgnorePath)
-		require.NoError(t, err)
-		assert.Contains(t, string(gitIgnoreContent), ".cursor/rules/snyk_rules.mdc")
-		assert.Contains(t, string(gitIgnoreContent), "# Snyk Security Extension - AI Rules (auto-generated)")
-		// Gitignore should never contain backslashes
-		assert.NotContains(t, string(gitIgnoreContent), "\\")
-	})
-
-	t.Run("does not add gitignore entry if file is already ignored", func(t *testing.T) {
-		tempGitRoot := t.TempDir()
-		_, err := git.PlainInit(tempGitRoot, false)
-		require.NoError(t, err)
-
-		// Create .gitignore file that already ignores the rules file (use forward slashes for gitignore)
-		gitIgnorePath := filepath.Join(tempGitRoot, ".gitignore")
-		err = os.WriteFile(gitIgnorePath, []byte("# Initial gitignore\n.cursor/rules/snyk_rules.mdc\n"), 0644)
-		require.NoError(t, err)
-
-		// Create a rules file using OS-native path separator
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		fullPath := filepath.Join(tempGitRoot, relativeRulesPath)
-		err = os.MkdirAll(filepath.Dir(fullPath), 0755)
-		require.NoError(t, err)
-		err = os.WriteFile(fullPath, []byte("# Test Rules"), 0644)
-		require.NoError(t, err)
-
-		// Call gitIgnoreLocalRulesFile
-		err = gitIgnoreLocalRulesFile(tempGitRoot, relativeRulesPath, logger)
-		require.NoError(t, err)
-
-		// Verify gitignore was NOT updated (file was already ignored, so not visible to git)
-		gitIgnoreContent, err := os.ReadFile(gitIgnorePath)
-		require.NoError(t, err)
-		// Should not contain the auto-generated comment since file was already ignored
-		assert.NotContains(t, string(gitIgnoreContent), "# Snyk Security Extension - AI Rules (auto-generated)")
-	})
-
-	t.Run("returns error for non-git directory", func(t *testing.T) {
-		tempDir := t.TempDir()
-		// Don't initialize git
-
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		err := gitIgnoreLocalRulesFile(tempDir, relativeRulesPath, logger)
-		assert.Error(t, err)
-	})
-}
-
-func TestWriteGlobalSkills(t *testing.T) {
-	nopLogger := zerolog.New(io.Discard)
-	logger := &nopLogger
-	skillsContent := "---\nname: snyk-rules\ndescription: Test skill\n---\n\n# Test Skills\nSkill content"
-
-	t.Run("creates skills file without delimiters", func(t *testing.T) {
-		tempDir := t.TempDir()
-		targetFile := filepath.Join(tempDir, "snyk-rules", "SKILL.md")
-
-		err := writeGlobalSkills(targetFile, skillsContent, logger)
-		require.NoError(t, err)
-
-		assert.FileExists(t, targetFile)
-
-		content, err := os.ReadFile(targetFile)
-		require.NoError(t, err)
-		contentStr := string(content)
-
-		// Verify raw content without delimiters
-		assert.Equal(t, skillsContent, contentStr)
-		assert.NotContains(t, contentStr, RuleStart)
-		assert.NotContains(t, contentStr, RuleEnd)
-	})
-
-	t.Run("skips if content unchanged", func(t *testing.T) {
-		tempDir := t.TempDir()
-		targetFile := filepath.Join(tempDir, "snyk-rules", "SKILL.md")
-
-		// Write initial content
-		err := writeGlobalSkills(targetFile, skillsContent, logger)
-		require.NoError(t, err)
-
-		// Write same content again - should not error
-		err = writeGlobalSkills(targetFile, skillsContent, logger)
-		require.NoError(t, err)
-
-		// Verify content unchanged
-		content, err := os.ReadFile(targetFile)
-		require.NoError(t, err)
-		assert.Equal(t, skillsContent, string(content))
-	})
-
-	t.Run("overwrites with new content", func(t *testing.T) {
-		tempDir := t.TempDir()
-		targetFile := filepath.Join(tempDir, "snyk-rules", "SKILL.md")
-
-		// Write initial content
-		err := writeGlobalSkills(targetFile, skillsContent, logger)
-		require.NoError(t, err)
-
-		// Write new content
-		newContent := "---\nname: snyk-rules\ndescription: Updated skill\n---\n\n# Updated Skills"
-		err = writeGlobalSkills(targetFile, newContent, logger)
-		require.NoError(t, err)
-
-		content, err := os.ReadFile(targetFile)
-		require.NoError(t, err)
-		assert.Equal(t, newContent, string(content))
-	})
-
-	t.Run("creates nested directories", func(t *testing.T) {
-		tempDir := t.TempDir()
-		targetFile := filepath.Join(tempDir, "deep", "nested", "dir", "SKILL.md")
-
-		err := writeGlobalSkills(targetFile, skillsContent, logger)
-		require.NoError(t, err)
-
-		assert.FileExists(t, targetFile)
 	})
 }
 

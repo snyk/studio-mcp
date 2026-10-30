@@ -10,10 +10,9 @@ import (
 type hostConfig struct {
 	name                 string
 	mcpGlobalConfigPath  string // Path to MCP server configuration JSON
-	localRulesPath       string // Relative path for local workspace rules
 	globalRulesPath      string // Absolute path for global user rules (delimited)
 	globalSkillsPath     string // Absolute path for global user skills (no delimiters)
-	legacyLocalRulesPath string // Old local rules path to clean up during migration
+	legacyLocalRulesPath string // Old workspace-relative rules path to clean up
 }
 
 // getHostConfig returns MCP-Host-specific configuration based on the host name
