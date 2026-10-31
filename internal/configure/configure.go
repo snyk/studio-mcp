@@ -15,8 +15,8 @@ import (
 var ErrConfigureRemoved = errors.New("snyk mcp configure only supports --rm; use `snyk studio install` to install Snyk Studio")
 
 // Configure removes the Snyk MCP server and the legacy Snyk rules and skills
-// from the specified IDE host. `snyk studio install` calls it to clean up
-// after older IDE extensions and installers.
+// from the specified IDE host. snyk-ls calls it once, after its first
+// `snyk studio install`, to clean up what older IDE extensions wrote.
 func Configure(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface) error {
 	if !config.GetBool(shared.RemoveParam) {
 		return ErrConfigureRemoved

@@ -120,7 +120,7 @@ func Test_ConfigureWorkflow(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(rulesPath), 0755))
 		require.NoError(t, os.WriteFile(rulesPath, []byte(configure.RuleStart+"\n# Snyk Rules\n"+configure.RuleEnd+"\n"), 0644))
 
-		// The arguments the installers pass to `snyk mcp configure`.
+		// The arguments the Python installer passes to `snyk mcp configure`.
 		err := invokeConfigure(t, []string{
 			"--tool", "claude-cli", "--rm",
 			"--rules-scope", "global", "--rule-type", "always-apply", "--workspace", t.TempDir(),

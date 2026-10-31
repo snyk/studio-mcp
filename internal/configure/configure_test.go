@@ -86,8 +86,41 @@ func TestConfigure(t *testing.T) {
 		assert.Empty(t, entries)
 	})
 
+	t.Run("removes the Cursor skill and workspace rules as snyk-ls calls it", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		mcpPath := filepath.Join(home, ".cursor", "mcp.json")
+		skillPath := filepath.Join(home, ".cursor", "skills", "snyk-rules", "SKILL.md")
+		workspace := t.TempDir()
+		legacyRulesPath := filepath.Join(workspace, ".cursor", "rules", "snyk_rules.mdc")
+		for path, content := range map[string]string{
+			mcpPath:         snykMcpConfig,
+			skillPath:       "# Snyk Rules",
+			legacyRulesPath: "# Snyk Rules",
+		} {
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+		}
+
+		// snyk-ls's removal call: the editor's name as the tool, once per trusted folder.
+		config := configuration.NewWithOpts()
+		config.Set(shared.ToolNameParam, "Cursor")
+		config.Set(shared.RemoveParam, true)
+		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
+		config.Set(shared.WorkspacePathParam, workspace)
+		config.Set(shared.ConfigureMcpParam, false)
+		config.Set(shared.ConfigureRulesParam, true)
+
+		err := Configure(logger, config, newUi(t))
+		require.NoError(t, err)
+
+		assert.NoFileExists(t, skillPath)
+		assert.NoFileExists(t, legacyRulesPath)
+		assert.Contains(t, readMcpServers(t, mcpPath), shared.ServerNameKey)
+	})
+
 	t.Run("removes rules and keeps MCP when configure-mcp is false", func(t *testing.T) {
-		// The legacy rules cleanup `snyk studio install` runs.
 		mcpPath, globalRulesPath, workspace, legacyRulesPath := setUpWindsurf(t)
 
 		config := configuration.NewWithOpts()
