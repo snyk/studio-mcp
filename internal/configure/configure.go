@@ -3,6 +3,7 @@ package configure
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/configuration"
@@ -27,11 +28,6 @@ func Configure(logger *zerolog.Logger, config configuration.Configuration, userI
 		return err
 	}
 
-	return removeConfiguration(logger, config, userInterface, ideConf)
-}
-
-// removeConfiguration removes the Snyk MCP server and rules from the specified tool
-func removeConfiguration(logger *zerolog.Logger, config configuration.Configuration, userInterface ui.UserInterface, ideConf *hostConfig) error {
 	rulesScope := config.GetString(shared.RulesScopeParam)
 	workspacePath := config.GetString(shared.WorkspacePathParam)
 	configureMcp := config.GetBool(shared.ConfigureMcpParam)
@@ -42,7 +38,7 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 		if ideConf.mcpGlobalConfigPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📝 Removing MCP server from: %s", ideConf.mcpGlobalConfigPath))
 
-			err := removeMcpServerFromJson(ideConf.mcpGlobalConfigPath, shared.ServerNameKey, logger)
+			err := removeMcpServerFromJson(ideConf.mcpGlobalConfigPath, logger)
 			if err != nil {
 				return fmt.Errorf("failed to remove MCP server for %s: %w", ideConf.name, err)
 			}
@@ -58,7 +54,7 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 		if ideConf.globalSkillsPath != "" {
 			_ = userInterface.Output(fmt.Sprintf("📋 Removing global skills from: %s", ideConf.globalSkillsPath))
 
-			err := removeGlobalSkills(ideConf.globalSkillsPath, logger)
+			err := removeFileIfExists(ideConf.globalSkillsPath, logger)
 			if err != nil {
 				return fmt.Errorf("failed to remove global skills for %s: %w", ideConf.name, err)
 			}
@@ -82,7 +78,7 @@ func removeConfiguration(logger *zerolog.Logger, config configuration.Configurat
 
 		// Clean up legacy local rules
 		if ideConf.legacyLocalRulesPath != "" && workspacePath != "" {
-			err := removeLocalRules(workspacePath, ideConf.legacyLocalRulesPath, logger)
+			err := removeFileIfExists(filepath.Join(workspacePath, ideConf.legacyLocalRulesPath), logger)
 			if err != nil {
 				logger.Warn().Err(err).Msgf("Unable to clean up legacy local rules at %s", ideConf.legacyLocalRulesPath)
 			}

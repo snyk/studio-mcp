@@ -133,31 +133,16 @@ func configureWorkflow(
 	invocation workflow.InvocationContext,
 	_ []workflow.Data,
 ) (output []workflow.Data, err error) {
-	defer OnPanicRecover(invocation.GetEnhancedLogger())
-
-	config := invocation.GetConfiguration()
 	logger := invocation.GetEnhancedLogger()
+	defer OnPanicRecover(logger)
 
-	config.Set(configuration.INTEGRATION_NAME, "MCP")
-
-	runtimeInfo := invocation.GetRuntimeInfo()
-	if runtimeInfo != nil {
-		config.Set(configuration.INTEGRATION_VERSION, runtimeInfo.GetVersion())
-	} else {
-		config.Set(configuration.INTEGRATION_VERSION, "unknown")
-	}
-
-	output = []workflow.Data{}
-
-	logger.Trace().Interface("environment", redactedEnviron()).Msg("start environment")
-
-	err = configure.Configure(invocation.GetEnhancedLogger(), invocation.GetConfiguration(), invocation.GetUserInterface())
+	err = configure.Configure(logger, invocation.GetConfiguration(), invocation.GetUserInterface())
 	if err != nil {
 		logger.Err(err).Msg("Failed to configure mcp server")
 		return nil, err
 	}
 
-	return output, nil
+	return []workflow.Data{}, nil
 }
 
 var sensitiveEnvSubstrings = []string{"token", "auth"}

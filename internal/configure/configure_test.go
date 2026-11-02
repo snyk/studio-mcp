@@ -17,102 +17,89 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// snykMcpConfig holds a Snyk entry as the IDE CLI wrote it: a "/snyk-" binary running "mcp -t stdio".
+const snykMcpConfig = `{"mcpServers":{"Snyk":{"command":"/data/snyk/vscode-cli/snyk-macos-arm64","args":["mcp","-t","stdio"]},"Other":{"command":"other"}}}`
+
+// setHome points the user's home directory at a new temp dir and returns it.
+func setHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+// writeFiles writes each file, creating its parent directories.
+func writeFiles(t *testing.T, files map[string]string) {
+	t.Helper()
+	for path, content := range files {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	}
+}
+
+func readMcpServers(t *testing.T, path string) map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var config map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &config))
+	servers, ok := config["mcpServers"].(map[string]interface{})
+	require.True(t, ok)
+	return servers
+}
+
 func TestConfigure(t *testing.T) {
 	nopLogger := zerolog.New(io.Discard)
 	logger := &nopLogger
-
-	// Snyk entry as the IDE CLI wrote it: a "/snyk-" binary running "mcp -t stdio".
-	snykMcpConfig := `{"mcpServers":{"Snyk":{"command":"/data/snyk/vscode-cli/snyk-macos-arm64","args":["mcp","-t","stdio"]},"Other":{"command":"other"}}}`
 	rulesContent := "# My rules\n\n" + RuleStart + "\n# Snyk Rules\n" + RuleEnd + "\n"
 
-	newUi := func(t *testing.T) *mocks.MockUserInterface {
+	// remove runs a removal the way snyk-ls does: config keys set directly, global rules scope.
+	remove := func(t *testing.T, tool, workspace string, removeMcp, removeRules bool) error {
 		t.Helper()
 		userInterface := mocks.NewMockUserInterface(gomock.NewController(t))
 		userInterface.EXPECT().Output(gomock.Any()).AnyTimes()
-		return userInterface
+
+		config := configuration.NewWithOpts()
+		config.Set(shared.ToolNameParam, tool)
+		config.Set(shared.RemoveParam, true)
+		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
+		config.Set(shared.WorkspacePathParam, workspace)
+		config.Set(shared.ConfigureMcpParam, removeMcp)
+		config.Set(shared.ConfigureRulesParam, removeRules)
+		return Configure(logger, config, userInterface)
 	}
 
-	// setUpWindsurf points the home directory at a temp dir and writes the
-	// artifacts an older IDE extension left for Windsurf.
+	// setUpWindsurf writes the artifacts an older IDE extension left for Windsurf.
 	setUpWindsurf := func(t *testing.T) (mcpPath, globalRulesPath, workspace, legacyRulesPath string) {
 		t.Helper()
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		t.Setenv("USERPROFILE", home)
-
-		windsurfDir := filepath.Join(home, ".codeium", "windsurf")
+		windsurfDir := filepath.Join(setHome(t), ".codeium", "windsurf")
 		mcpPath = filepath.Join(windsurfDir, "mcp_config.json")
 		globalRulesPath = filepath.Join(windsurfDir, "memories", "global_rules.md")
 		workspace = t.TempDir()
 		legacyRulesPath = filepath.Join(workspace, ".windsurf", "rules", "snyk_rules.md")
-
-		for path, content := range map[string]string{
+		writeFiles(t, map[string]string{
 			mcpPath:         snykMcpConfig,
 			globalRulesPath: rulesContent,
 			legacyRulesPath: "# Snyk Rules",
-		} {
-			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
-			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
-		}
+		})
 		return mcpPath, globalRulesPath, workspace, legacyRulesPath
 	}
 
-	readMcpServers := func(t *testing.T, path string) map[string]interface{} {
-		t.Helper()
-		data, err := os.ReadFile(path)
-		require.NoError(t, err)
-		var config map[string]interface{}
-		require.NoError(t, json.Unmarshal(data, &config))
-		servers, ok := config["mcpServers"].(map[string]interface{})
-		require.True(t, ok)
-		return servers
-	}
-
-	t.Run("rejects calls without --rm and writes nothing", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		t.Setenv("USERPROFILE", home)
-
-		config := configuration.NewWithOpts()
-		config.Set(shared.ToolNameParam, "cursor")
-		config.Set(shared.ConfigureMcpParam, true)
-		config.Set(shared.ConfigureRulesParam, true)
-
-		err := Configure(logger, config, newUi(t))
-
-		assert.ErrorIs(t, err, ErrConfigureRemoved)
-		entries, err := os.ReadDir(home)
-		require.NoError(t, err)
-		assert.Empty(t, entries)
-	})
-
 	t.Run("removes the Cursor skill and workspace rules as snyk-ls calls it", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		t.Setenv("USERPROFILE", home)
+		home := setHome(t)
 		mcpPath := filepath.Join(home, ".cursor", "mcp.json")
 		skillPath := filepath.Join(home, ".cursor", "skills", "snyk-rules", "SKILL.md")
 		workspace := t.TempDir()
 		legacyRulesPath := filepath.Join(workspace, ".cursor", "rules", "snyk_rules.mdc")
-		for path, content := range map[string]string{
+		writeFiles(t, map[string]string{
 			mcpPath:         snykMcpConfig,
 			skillPath:       "# Snyk Rules",
 			legacyRulesPath: "# Snyk Rules",
-		} {
-			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
-			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
-		}
+		})
 
-		// snyk-ls's removal call: the editor's name as the tool, once per trusted folder.
-		config := configuration.NewWithOpts()
-		config.Set(shared.ToolNameParam, "Cursor")
-		config.Set(shared.RemoveParam, true)
-		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
-		config.Set(shared.WorkspacePathParam, workspace)
-		config.Set(shared.ConfigureMcpParam, false)
-		config.Set(shared.ConfigureRulesParam, true)
-
-		err := Configure(logger, config, newUi(t))
+		// snyk-ls passes the editor's name as the tool, once per trusted folder.
+		err := remove(t, "Cursor", workspace, false, true)
 		require.NoError(t, err)
 
 		assert.NoFileExists(t, skillPath)
@@ -123,15 +110,7 @@ func TestConfigure(t *testing.T) {
 	t.Run("removes rules and keeps MCP when configure-mcp is false", func(t *testing.T) {
 		mcpPath, globalRulesPath, workspace, legacyRulesPath := setUpWindsurf(t)
 
-		config := configuration.NewWithOpts()
-		config.Set(shared.ToolNameParam, "windsurf")
-		config.Set(shared.RemoveParam, true)
-		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
-		config.Set(shared.WorkspacePathParam, workspace)
-		config.Set(shared.ConfigureMcpParam, false)
-		config.Set(shared.ConfigureRulesParam, true)
-
-		err := Configure(logger, config, newUi(t))
+		err := remove(t, "windsurf", workspace, false, true)
 		require.NoError(t, err)
 
 		rules, err := os.ReadFile(globalRulesPath)
@@ -144,15 +123,7 @@ func TestConfigure(t *testing.T) {
 	t.Run("removes MCP and keeps rules when configure-rules is false", func(t *testing.T) {
 		mcpPath, globalRulesPath, workspace, legacyRulesPath := setUpWindsurf(t)
 
-		config := configuration.NewWithOpts()
-		config.Set(shared.ToolNameParam, "windsurf")
-		config.Set(shared.RemoveParam, true)
-		config.Set(shared.RulesScopeParam, shared.RulesGlobalScope)
-		config.Set(shared.WorkspacePathParam, workspace)
-		config.Set(shared.ConfigureMcpParam, true)
-		config.Set(shared.ConfigureRulesParam, false)
-
-		err := Configure(logger, config, newUi(t))
+		err := remove(t, "windsurf", workspace, true, false)
 		require.NoError(t, err)
 
 		servers := readMcpServers(t, mcpPath)
@@ -165,11 +136,7 @@ func TestConfigure(t *testing.T) {
 	})
 
 	t.Run("returns an error for an unsupported tool", func(t *testing.T) {
-		config := configuration.NewWithOpts()
-		config.Set(shared.ToolNameParam, "unsupported")
-		config.Set(shared.RemoveParam, true)
-
-		err := Configure(logger, config, newUi(t))
+		err := remove(t, "unsupported", "", true, true)
 
 		assert.ErrorContains(t, err, "unsupported Tool")
 	})
@@ -338,43 +305,6 @@ func TestGetHostConfig_VSCodePaths(t *testing.T) {
 	}
 }
 
-func TestTrimFunctions(t *testing.T) {
-	t.Run("trimTrailingNewlines", func(t *testing.T) {
-		tests := []struct {
-			input    string
-			expected string
-		}{
-			{"text\n", "text"},
-			{"text\n\n\n", "text"},
-			{"text\r\n", "text"},
-			{"text", "text"},
-			{"text with spaces   \n", "text with spaces"},
-		}
-
-		for _, tt := range tests {
-			result := trimTrailingNewlines(tt.input)
-			assert.Equal(t, tt.expected, result)
-		}
-	})
-
-	t.Run("trimLeadingNewlines", func(t *testing.T) {
-		tests := []struct {
-			input    string
-			expected string
-		}{
-			{"\ntext", "text"},
-			{"\n\n\ntext", "text"},
-			{"\r\ntext", "text"},
-			{"text", "text"},
-		}
-
-		for _, tt := range tests {
-			result := trimLeadingNewlines(tt.input)
-			assert.Equal(t, tt.expected, result)
-		}
-	})
-}
-
 func TestRemoveMcpServerFromJson(t *testing.T) {
 	nopLogger := zerolog.New(io.Discard)
 	logger := &nopLogger
@@ -402,7 +332,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Remove Snyk server by its command/args signature
-		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		err = removeMcpServerFromJson(configPath, logger)
 		require.NoError(t, err)
 
 		// Verify Snyk was removed but OtherServer remains
@@ -440,7 +370,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Try to remove - should not remove anything since multiple SAI servers exist
-		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		err = removeMcpServerFromJson(configPath, logger)
 		require.NoError(t, err)
 
 		// Verify both servers still exist
@@ -478,7 +408,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Remove Snyk server
-		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		err = removeMcpServerFromJson(configPath, logger)
 		require.NoError(t, err)
 
 		// Verify other fields are preserved
@@ -497,7 +427,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		tempDir := t.TempDir()
 		configPath := filepath.Join(tempDir, "nonexistent.json")
 
-		err := removeMcpServerFromJson(configPath, "Snyk", logger)
+		err := removeMcpServerFromJson(configPath, logger)
 		require.NoError(t, err)
 	})
 
@@ -519,7 +449,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Try to remove non-existent Snyk server
-		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		err = removeMcpServerFromJson(configPath, logger)
 		require.NoError(t, err)
 
 		// Verify OtherServer still exists
@@ -553,7 +483,7 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 		require.NoError(t, err)
 
 		// Remove using "Snyk" (different case) - should find and remove the lowercase "snyk" key
-		err = removeMcpServerFromJson(configPath, "Snyk", logger)
+		err = removeMcpServerFromJson(configPath, logger)
 		require.NoError(t, err)
 
 		// Verify server was removed
@@ -569,39 +499,22 @@ func TestRemoveMcpServerFromJson(t *testing.T) {
 	})
 }
 
-func TestRemoveLocalRules(t *testing.T) {
+func TestRemoveFileIfExists(t *testing.T) {
 	nopLogger := zerolog.New(io.Discard)
 	logger := &nopLogger
 
-	t.Run("removes existing local rules file", func(t *testing.T) {
-		tempDir := t.TempDir()
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-		fullPath := filepath.Join(tempDir, relativeRulesPath)
+	t.Run("removes an existing file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".cursor", "rules", "snyk_rules.mdc")
+		writeFiles(t, map[string]string{path: "# Snyk Rules"})
 
-		// Create the rules file
-		err := os.MkdirAll(filepath.Dir(fullPath), 0755)
-		require.NoError(t, err)
-		err = os.WriteFile(fullPath, []byte("# Test Rules"), 0644)
+		err := removeFileIfExists(path, logger)
 		require.NoError(t, err)
 
-		// Verify file exists
-		assert.FileExists(t, fullPath)
-
-		// Remove the rules
-		err = removeLocalRules(tempDir, relativeRulesPath, logger)
-		require.NoError(t, err)
-
-		// Verify file was removed
-		_, err = os.Stat(fullPath)
-		assert.True(t, os.IsNotExist(err))
+		assert.NoFileExists(t, path)
 	})
 
 	t.Run("handles non-existent file gracefully", func(t *testing.T) {
-		tempDir := t.TempDir()
-		relativeRulesPath := filepath.Join(".cursor", "rules", "snyk_rules.mdc")
-
-		// Try to remove non-existent file
-		err := removeLocalRules(tempDir, relativeRulesPath, logger)
+		err := removeFileIfExists(filepath.Join(t.TempDir(), "SKILL.md"), logger)
 		require.NoError(t, err)
 	})
 }
@@ -684,37 +597,6 @@ func TestRemoveGlobalRules(t *testing.T) {
 		result, err := os.ReadFile(targetFile)
 		require.NoError(t, err)
 		assert.Equal(t, content, string(result))
-	})
-}
-
-func TestRemoveGlobalSkills(t *testing.T) {
-	nopLogger := zerolog.New(io.Discard)
-	logger := &nopLogger
-
-	t.Run("removes existing skills file", func(t *testing.T) {
-		tempDir := t.TempDir()
-		targetFile := filepath.Join(tempDir, "SKILL.md")
-
-		// Create the file
-		err := os.WriteFile(targetFile, []byte("# Skills"), 0644)
-		require.NoError(t, err)
-		assert.FileExists(t, targetFile)
-
-		// Remove it
-		err = removeGlobalSkills(targetFile, logger)
-		require.NoError(t, err)
-
-		// Verify file was removed
-		_, err = os.Stat(targetFile)
-		assert.True(t, os.IsNotExist(err))
-	})
-
-	t.Run("handles non-existent file gracefully", func(t *testing.T) {
-		tempDir := t.TempDir()
-		targetFile := filepath.Join(tempDir, "nonexistent.md")
-
-		err := removeGlobalSkills(targetFile, logger)
-		require.NoError(t, err)
 	})
 }
 

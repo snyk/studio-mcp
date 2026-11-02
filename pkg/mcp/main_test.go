@@ -106,7 +106,6 @@ func Test_ConfigureWorkflow(t *testing.T) {
 		invocation.EXPECT().GetConfiguration().Return(config).AnyTimes()
 		invocation.EXPECT().GetEnhancedLogger().Return(&logger).AnyTimes()
 		invocation.EXPECT().GetUserInterface().Return(userInterface).AnyTimes()
-		invocation.EXPECT().GetRuntimeInfo().Return(nil).AnyTimes()
 
 		_, err := configureWorkflow(invocation, nil)
 		return err

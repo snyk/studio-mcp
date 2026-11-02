@@ -2,7 +2,9 @@ package configure
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,20 +13,17 @@ import (
 	"github.com/snyk/studio-mcp/shared"
 )
 
-// removeMcpServerFromJson removes an MCP server from the configuration JSON file
+// removeMcpServerFromJson removes the Snyk MCP server from the configuration JSON file
 // This function identifies the SAI MCP server by its command and args.
 // It only removes if exactly one server with the matching command and args is found.
 // If multiple servers match or none match, nothing is removed.
 // This function preserves all other fields in the JSON file
-func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger) error {
-	// Check if file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+func removeMcpServerFromJson(filePath string, logger *zerolog.Logger) error {
+	data, err := os.ReadFile(filePath)
+	if errors.Is(err, fs.ErrNotExist) {
 		logger.Debug().Msgf("Config file does not exist: %s, nothing to remove", filePath)
 		return nil
 	}
-
-	// Read existing config
-	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -47,11 +46,8 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 		return nil
 	}
 
-	// Look for any server where command contains McpServerCommand and args are ["mcp", "-t", "stdio"]
-	expectedArgs := []string{shared.McpServerStdioArg1, shared.McpServerStdioArg2, shared.McpServerStdioArg3}
-	matchingKeys := findMatchingServerKeys(mcpServers, expectedArgs, 2)
-
 	// Only remove if exactly one matching server is found
+	matchingKeys := findSnykServerKeys(mcpServers)
 	if len(matchingKeys) == 0 {
 		return nil
 	}
@@ -61,10 +57,7 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 		return nil
 	}
 
-	keyToRemove := matchingKeys[0]
-
-	// Remove the server
-	delete(mcpServers, keyToRemove)
+	delete(mcpServers, matchingKeys[0])
 	config["mcpServers"] = mcpServers
 
 	// Write updated config
@@ -80,15 +73,13 @@ func removeMcpServerFromJson(filePath, serverKey string, logger *zerolog.Logger)
 	return nil
 }
 
-// findMatchingServerKeys finds all server keys that match the SAI MCP server's args and command, returning up to maxResultCount results.
-func findMatchingServerKeys(servers map[string]interface{}, expectedArgs []string, maxResultCount int) []string {
+// findSnykServerKeys finds the keys of all servers whose command contains McpServerCommandPattern
+// and whose args are ["mcp", "-t", "stdio"].
+func findSnykServerKeys(servers map[string]interface{}) []string {
+	expectedArgs := []string{shared.McpServerStdioArg1, shared.McpServerStdioArg2, shared.McpServerStdioArg3}
 	var matchingKeys []string
 
 	for key, serverConfig := range servers {
-		if len(matchingKeys) >= maxResultCount {
-			break
-		}
-
 		serverConfigFields, ok := serverConfig.(map[string]interface{})
 		if !ok {
 			continue

@@ -1,9 +1,10 @@
 package configure
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -14,48 +15,28 @@ const (
 	RuleEnd   = "<!--# END SNYK GLOBAL RULE -->"
 )
 
-// removeLocalRules removes the local rules file from the workspace
-func removeLocalRules(workspacePath, relativeRulesPath string, logger *zerolog.Logger) error {
-	rulesPath := filepath.Join(workspacePath, relativeRulesPath)
-
-	// Check if file exists
-	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
-		logger.Debug().Msgf("Local rules file does not exist at %s, nothing to remove", rulesPath)
+// removeFileIfExists removes a file Snyk owns outright, such as a skill or a local rules file
+func removeFileIfExists(path string, logger *zerolog.Logger) error {
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		logger.Debug().Msgf("%s does not exist, nothing to remove", path)
 		return nil
 	}
-
-	if err := os.Remove(rulesPath); err != nil {
-		return fmt.Errorf("failed to remove local rules: %w", err)
+	if err != nil {
+		return fmt.Errorf("failed to remove %s: %w", path, err)
 	}
 
-	logger.Debug().Msgf("Removed local rules from %s", rulesPath)
-	return nil
-}
-
-// removeGlobalSkills removes the global skills file
-func removeGlobalSkills(targetFile string, logger *zerolog.Logger) error {
-	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
-		logger.Debug().Msgf("Global skills file does not exist at %s, nothing to remove", targetFile)
-		return nil
-	}
-
-	if err := os.Remove(targetFile); err != nil {
-		return fmt.Errorf("failed to remove global skills: %w", err)
-	}
-
-	logger.Debug().Msgf("Removed global skills from %s", targetFile)
+	logger.Debug().Msgf("Removed %s", path)
 	return nil
 }
 
 // removeGlobalRules removes the Snyk rules block from the global rules file
 func removeGlobalRules(targetFile string, logger *zerolog.Logger) error {
-	// Check if file exists
-	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
+	data, err := os.ReadFile(targetFile)
+	if errors.Is(err, fs.ErrNotExist) {
 		logger.Debug().Msgf("Global rules file does not exist at %s, nothing to remove", targetFile)
 		return nil
 	}
-
-	data, err := os.ReadFile(targetFile)
 	if err != nil {
 		return fmt.Errorf("failed to read global rules file: %w", err)
 	}
@@ -90,8 +71,8 @@ func removeDelimitedBlock(source, start, end string) string {
 	}
 
 	// Remove from start marker to end marker (inclusive of the end marker)
-	before := trimTrailingNewlines(src[:startIdx])
-	after := trimLeadingNewlines(src[endIdx+len(end):])
+	before := strings.TrimRight(src[:startIdx], "\n\r ")
+	after := strings.TrimLeft(src[endIdx+len(end):], "\n\r")
 
 	separator := ""
 	if before != "" && after != "" {
@@ -105,12 +86,4 @@ func removeDelimitedBlock(source, start, end string) string {
 	}
 
 	return result
-}
-
-func trimTrailingNewlines(s string) string {
-	return strings.TrimRight(s, "\n\r ")
-}
-
-func trimLeadingNewlines(s string) string {
-	return strings.TrimLeft(s, "\n\r")
 }
