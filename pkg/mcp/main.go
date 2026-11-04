@@ -51,14 +51,15 @@ func Init(engine workflow.Engine) error {
 	mcpFlags.StringP(shared.OutputDirParam, "o", "", "specifies the output directory for scan responses")
 	mcpFlags.StringP(mcp.ProfileFlagName, "p", "", "sets the tool profile <lite|full|experimental>. 'full' (default) includes all non-experimental tools, 'lite' includes essential tools only, 'experimental' includes all tools")
 
+	// mcp.configure only removes what older IDE extensions wrote; `snyk studio install` installs.
 	configureFlags := pflag.NewFlagSet("configure", pflag.ContinueOnError)
-	configureFlags.StringP(shared.ToolNameParam, "t", "", "automatically configure snyk mcp server for a tool. supported tools: cursor, windsurf, antigravity, copilot, gemini-cli, claude-cli")
-	configureFlags.StringP(shared.RulesScopeParam, "", "global", "set configuration scope for rules. supported values: global, workspace")
-	configureFlags.String(shared.WorkspacePathParam, "", "workspace path for local rules (defaults to current directory)")
-	configureFlags.String(shared.RuleTypeParam, shared.RuleTypeAlwaysApply, "choose rule type to write <always-apply|smart-apply>. default always-apply")
-	configureFlags.Bool(shared.RemoveParam, false, "remove the Snyk MCP server from the specified tool configuration")
-	configureFlags.Bool(shared.ConfigureMcpParam, true, "configure MCP server in tool's config file (default true)")
-	configureFlags.Bool(shared.ConfigureRulesParam, true, "configure Snyk rules for the tool (default true)")
+	configureFlags.StringP(shared.ToolNameParam, "t", "", "tool to remove the snyk mcp server and rules from. supported tools: cursor, windsurf, antigravity, vs_code, gemini-cli, claude-cli")
+	configureFlags.StringP(shared.RulesScopeParam, "", "global", "set scope for rules removal. supported values: global, workspace")
+	configureFlags.String(shared.WorkspacePathParam, "", "workspace path for legacy local rules removal")
+	configureFlags.String(shared.RuleTypeParam, "", "ignored; accepted for compatibility with existing callers")
+	configureFlags.Bool(shared.RemoveParam, false, "remove the Snyk MCP server and rules from the specified tool configuration (required)")
+	configureFlags.Bool(shared.ConfigureMcpParam, true, "remove the MCP server from the tool's config file (default true)")
+	configureFlags.Bool(shared.ConfigureRulesParam, true, "remove Snyk rules and skills for the tool (default true)")
 
 	mcpCfg := workflow.ConfigurationOptionsFromFlagset(mcpFlags)
 	mcpEntry, _ := engine.Register(WORKFLOWID_MCP, mcpCfg, mcpWorkflow)
@@ -132,36 +133,16 @@ func configureWorkflow(
 	invocation workflow.InvocationContext,
 	_ []workflow.Data,
 ) (output []workflow.Data, err error) {
-	defer OnPanicRecover(invocation.GetEnhancedLogger())
-
-	config := invocation.GetConfiguration()
 	logger := invocation.GetEnhancedLogger()
+	defer OnPanicRecover(logger)
 
-	config.Set(configuration.INTEGRATION_NAME, "MCP")
-
-	runtimeInfo := invocation.GetRuntimeInfo()
-	if runtimeInfo != nil {
-		config.Set(configuration.INTEGRATION_VERSION, runtimeInfo.GetVersion())
-	} else {
-		config.Set(configuration.INTEGRATION_VERSION, "unknown")
-	}
-
-	output = []workflow.Data{}
-
-	cliPath, err := getCliPath(invocation)
-	if err != nil {
-		logger.Err(err).Msg("Failed to set cli path")
-		return output, err
-	}
-	logger.Trace().Interface("environment", redactedEnviron()).Msg("start environment")
-
-	err = configure.Configure(invocation.GetEnhancedLogger(), invocation.GetConfiguration(), invocation.GetUserInterface(), cliPath)
+	err = configure.Configure(logger, invocation.GetConfiguration(), invocation.GetUserInterface())
 	if err != nil {
 		logger.Err(err).Msg("Failed to configure mcp server")
 		return nil, err
 	}
 
-	return output, nil
+	return []workflow.Data{}, nil
 }
 
 var sensitiveEnvSubstrings = []string{"token", "auth"}

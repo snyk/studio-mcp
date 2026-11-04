@@ -1,12 +1,20 @@
 package mcp
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/golang/mock/gomock"
+	"github.com/rs/zerolog"
 	"github.com/snyk/go-application-framework/pkg/configuration"
+	"github.com/snyk/go-application-framework/pkg/mocks"
+	"github.com/snyk/go-application-framework/pkg/workflow"
+	"github.com/snyk/studio-mcp/internal/configure"
 	"github.com/snyk/studio-mcp/internal/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/snyk/go-application-framework/pkg/app"
 )
@@ -73,4 +81,66 @@ func Test_ExtensionEntryPoint(t *testing.T) {
 	assert.Eventuallyf(t, func() bool {
 		return expectedTransportType == engineConfig.GetString(mcp.TransportParam)
 	}, time.Minute, time.Millisecond, "")
+}
+
+func Test_ConfigureWorkflow(t *testing.T) {
+	// invokeConfigure parses args with the registered flags, as the CLI does,
+	// and runs the workflow without the engine's network-backed defaults.
+	invokeConfigure := func(t *testing.T, args []string) error {
+		t.Helper()
+		engine := app.CreateAppEngineWithOptions()
+		require.NoError(t, Init(engine))
+		entry, ok := engine.GetWorkflow(WORKFLOWID_MCP_CONFIG)
+		require.True(t, ok)
+
+		flags := workflow.FlagsetFromConfigurationOptions(entry.GetConfigurationOptions())
+		require.NoError(t, flags.Parse(args))
+		config := configuration.NewWithOpts()
+		require.NoError(t, config.AddFlagSet(flags))
+
+		ctrl := gomock.NewController(t)
+		logger := zerolog.Nop()
+		userInterface := mocks.NewMockUserInterface(ctrl)
+		userInterface.EXPECT().Output(gomock.Any()).AnyTimes()
+		invocation := mocks.NewMockInvocationContext(ctrl)
+		invocation.EXPECT().GetConfiguration().Return(config).AnyTimes()
+		invocation.EXPECT().GetEnhancedLogger().Return(&logger).AnyTimes()
+		invocation.EXPECT().GetUserInterface().Return(userInterface).AnyTimes()
+
+		_, err := configureWorkflow(invocation, nil)
+		return err
+	}
+
+	t.Run("accepts the legacy rules cleanup call", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		rulesPath := filepath.Join(home, ".claude", "CLAUDE.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(rulesPath), 0755))
+		require.NoError(t, os.WriteFile(rulesPath, []byte(configure.RuleStart+"\n# Snyk Rules\n"+configure.RuleEnd+"\n"), 0644))
+
+		// The arguments the Python installer passes to `snyk mcp configure`.
+		err := invokeConfigure(t, []string{
+			"--tool", "claude-cli", "--rm",
+			"--rules-scope", "global", "--rule-type", "always-apply", "--workspace", t.TempDir(),
+			"--configure-mcp=false", "--configure-rules=true",
+		})
+		require.NoError(t, err)
+
+		rules, err := os.ReadFile(rulesPath)
+		require.NoError(t, err)
+		assert.Empty(t, string(rules))
+	})
+
+	t.Run("rejects calls without --rm", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+
+		err := invokeConfigure(t, []string{"--tool", "claude-cli"})
+
+		assert.ErrorIs(t, err, configure.ErrConfigureRemoved)
+		assert.NoFileExists(t, filepath.Join(home, ".claude.json"))
+		assert.NoFileExists(t, filepath.Join(home, ".claude", "CLAUDE.md"))
+	})
 }
